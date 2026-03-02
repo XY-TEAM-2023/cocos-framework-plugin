@@ -177,7 +177,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 } else {
                     await runCommand(`git checkout ${latestTag}`, pluginPath);
                     await log(`[插件] 已更新 ${localVersion} → ${latestTag}`, 'success');
-                    await log('[插件] 请重启编辑器生效', 'warn');
+                    await log('[插件] 请在 扩展管理器 中关闭再开启本插件以生效', 'warn');
                 }
             } else {
                 const beforeHash = await runCommand('git rev-parse --short HEAD', pluginPath);
@@ -186,7 +186,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 await log(`[插件] 远程：${afterHash}（无版本 Tag）`);
                 if (beforeHash !== afterHash) {
                     await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
-                    await log('[插件] 请重启编辑器生效', 'warn');
+                    await log('[插件] 请在 扩展管理器 中关闭再开启本插件以生效', 'warn');
                 } else {
                     await log('[插件] 已是最新', 'success');
                 }
