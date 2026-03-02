@@ -129,6 +129,9 @@ async function log(message, type = 'info') {
 async function openLog() {
     await Editor.Panel.open('framework-plugin.log');
 }
+function setTitle(title) {
+    Editor.Message.send('framework-plugin', 'set-title', title);
+}
 // ==================== 插件入口 ====================
 exports.methods = {
     openLogPanel() {
@@ -139,6 +142,7 @@ exports.methods = {
      */
     async updateFramework() {
         await openLog();
+        setTitle('更新框架和插件');
         await log('========== 更新框架和插件 ==========');
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
@@ -197,6 +201,7 @@ exports.methods = {
      */
     async switchVersion() {
         await openLog();
+        setTitle('切换框架版本');
         await log('========== 切换框架版本 ==========');
         if (!frameworkExists()) {
             await log('[框架] 子模块不存在', 'error');
@@ -258,6 +263,7 @@ exports.methods = {
             return;
         }
         await openLog();
+        setTitle('推送框架版本');
         await log('========== 推送框架版本 🚀 ==========');
         if (!frameworkExists()) {
             await log('[框架] 子模块不存在', 'error');
@@ -325,6 +331,7 @@ exports.methods = {
             return;
         }
         await openLog();
+        setTitle('推送插件版本');
         await log('========== 推送插件版本 🔧 ==========');
         const pluginPath = getPluginPath();
         try {
@@ -394,6 +401,7 @@ exports.methods = {
      */
     async showAbout() {
         await openLog();
+        setTitle('关于');
         await log('========== 关于 ==========');
         try {
             if (frameworkExists()) {
@@ -427,6 +435,7 @@ exports.methods = {
             return;
         }
         await openLog();
+        setTitle('构建插件');
         await log('========== 构建插件 🔨 ==========');
         const pluginPath = getPluginPath();
         try {

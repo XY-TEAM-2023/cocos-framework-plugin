@@ -105,6 +105,10 @@ async function openLog() {
     await Editor.Panel.open('framework-plugin.log');
 }
 
+function setTitle(title: string) {
+    Editor.Message.send('framework-plugin', 'set-title', title);
+}
+
 // ==================== 插件入口 ====================
 
 export const methods: { [key: string]: (...args: any) => any } = {
@@ -118,6 +122,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async updateFramework() {
         await openLog();
+        setTitle('更新框架和插件');
         await log('========== 更新框架和插件 ==========');
 
         const fwPath = getFrameworkPath();
@@ -182,6 +187,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async switchVersion() {
         await openLog();
+        setTitle('切换框架版本');
         await log('========== 切换框架版本 ==========');
 
         if (!frameworkExists()) {
@@ -252,6 +258,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         }
 
         await openLog();
+        setTitle('推送框架版本');
         await log('========== 推送框架版本 🚀 ==========');
 
         if (!frameworkExists()) {
@@ -331,6 +338,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         }
 
         await openLog();
+        setTitle('推送插件版本');
         await log('========== 推送插件版本 🔧 ==========');
 
         const pluginPath = getPluginPath();
@@ -410,6 +418,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async showAbout() {
         await openLog();
+        setTitle('关于');
         await log('========== 关于 ==========');
 
         try {
@@ -447,6 +456,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         }
 
         await openLog();
+        setTitle('构建插件');
         await log('========== 构建插件 🔨 ==========');
 
         const pluginPath = getPluginPath();
