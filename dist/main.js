@@ -111,17 +111,10 @@ async function log(message, type = 'info') {
     catch (e) { }
 }
 /**
- * 等待指定时间（ms）
- */
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-/**
  * 打开日志面板并等待就绪
  */
 async function openLog() {
-    Editor.Panel.open('framework-plugin.log');
-    await sleep(500);
+    await Editor.Panel.open('framework-plugin.log');
 }
 // ==================== 插件入口 ====================
 exports.methods = {

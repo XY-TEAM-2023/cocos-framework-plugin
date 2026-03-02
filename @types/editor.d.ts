@@ -9,7 +9,7 @@ declare namespace Editor {
     }
 
     namespace Panel {
-        function open(panelId: string): void;
+        function open(panelId: string): Promise<void>;
         function close(panelId: string): void;
     }
 

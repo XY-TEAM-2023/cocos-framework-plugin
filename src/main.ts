@@ -86,18 +86,10 @@ async function log(message: string, type: 'info' | 'success' | 'warn' | 'error' 
 }
 
 /**
- * 等待指定时间（ms）
- */
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
  * 打开日志面板并等待就绪
  */
 async function openLog() {
-    Editor.Panel.open('framework-plugin.log');
-    await sleep(500);
+    await Editor.Panel.open('framework-plugin.log');
 }
 
 // ==================== 插件入口 ====================
