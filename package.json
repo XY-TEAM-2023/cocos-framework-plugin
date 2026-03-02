@@ -37,6 +37,11 @@
                 "message": "switch-version"
             },
             {
+                "path": "框架",
+                "label": "修复框架",
+                "message": "repair-framework"
+            },
+            {
                 "path": "框架/开发/框架",
                 "label": "推送版本",
                 "message": "publish-framework"
@@ -99,6 +104,9 @@
             },
             "set-title": {
                 "methods": ["log.setTitle"]
+            },
+            "repair-framework": {
+                "methods": ["repairFramework"]
             }
         }
     },

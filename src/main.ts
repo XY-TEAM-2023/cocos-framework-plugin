@@ -477,6 +477,84 @@ export const methods: { [key: string]: (...args: any) => any } = {
             await log(`[插件] 编译失败：${e.message}`, 'error');
         }
     },
+
+    /**
+     * 修复框架（还原框架和插件到最后提交状态）
+     */
+    async repairFramework() {
+        const result = await Editor.Dialog.warn(
+            '修复框架\n\n此操作将丢弃框架和插件的所有本地修改，还原到最后一次提交的状态。\n\n确定要继续吗？',
+            { buttons: ['确认修复', '取消'], default: 0, cancel: 1 }
+        );
+
+        if (result.response !== 0) return;
+
+        await openLog();
+        setTitle('修复框架');
+        await log('========== 修复框架 🔧 ==========');
+
+        const fwPath = getFrameworkPath();
+        const pluginPath = getPluginPath();
+
+        // --- 安全校验：确保路径正确 ---
+        const projectPath = getProjectPath();
+        const expectedFwPath = path.join(projectPath, 'assets', 'framework');
+        const expectedPluginPath = path.join(projectPath, 'extensions', 'framework-plugin');
+
+        // --- 修复框架 ---
+        if (frameworkExists()) {
+            if (path.resolve(fwPath) !== path.resolve(expectedFwPath)) {
+                await log('[框架] 路径异常，跳过修复', 'error');
+            } else {
+                try {
+                    const status = await runCommand('git status --porcelain', fwPath).catch(() => '');
+                    if (!status) {
+                        await log('[框架] 无需修复，没有本地修改', 'success');
+                    } else {
+                        await log('[框架] 检测到本地修改：');
+                        for (const line of status.split('\n')) {
+                            await log(`[框架]   ${line}`);
+                        }
+                        await runCommand('git checkout .', fwPath);
+                        await runCommand('git clean -fd', fwPath);
+                        await log('[框架] 已还原到最后提交状态', 'success');
+                    }
+                } catch (e: any) {
+                    await log(`[框架] 修复失败：${e.message}`, 'error');
+                }
+            }
+        } else {
+            await log('[框架] 子模块不存在，跳过', 'warn');
+        }
+
+        await log('─────────────────────────────');
+
+        // --- 修复插件 ---
+        if (path.resolve(pluginPath) !== path.resolve(expectedPluginPath)) {
+            await log('[插件] 路径异常，跳过修复', 'error');
+        } else {
+            try {
+                const status = await runCommand('git status --porcelain', pluginPath).catch(() => '');
+                if (!status) {
+                    await log('[插件] 无需修复，没有本地修改', 'success');
+                } else {
+                    await log('[插件] 检测到本地修改：');
+                    for (const line of status.split('\n')) {
+                        await log(`[插件]   ${line}`);
+                    }
+                    await runCommand('git checkout .', pluginPath);
+                    await runCommand('git clean -fd', pluginPath);
+                    await log('[插件] 已还原到最后提交状态', 'success');
+                    await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
+                }
+            } catch (e: any) {
+                await log(`[插件] 修复失败：${e.message}`, 'error');
+            }
+        }
+
+        Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+        await log('========== 修复完成 ✅ ==========', 'success');
+    },
 };
 
 export const load = function () {
