@@ -32,18 +32,23 @@
                 "message": "update-framework"
             },
             {
-                "path": "框架1",
+                "path": "框架",
                 "label": "切换框架版本",
                 "message": "switch-version"
             },
             {
-                "path": "框架/推送",
-                "label": "框架 🚀",
+                "path": "框架/开发/框架",
+                "label": "推送版本",
                 "message": "publish-framework"
             },
             {
-                "path": "框架/推送",
-                "label": "插件 🔧",
+                "path": "框架/开发/插件",
+                "label": "本地构建",
+                "message": "build-plugin"
+            },
+            {
+                "path": "框架/开发/插件",
+                "label": "推送版本",
                 "message": "publish-plugin"
             },
             {
@@ -88,6 +93,9 @@
             },
             "show-hash-input": {
                 "methods": ["log.showHashInput"]
+            },
+            "build-plugin": {
+                "methods": ["buildPlugin"]
             }
         }
     },

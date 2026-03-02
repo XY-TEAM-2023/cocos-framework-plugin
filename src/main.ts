@@ -436,6 +436,37 @@ export const methods: { [key: string]: (...args: any) => any } = {
             await log(`获取信息失败：${e.message}`, 'error');
         }
     },
+
+    /**
+     * 构建插件（仅 dev 项目）
+     */
+    async buildPlugin() {
+        if (!isDevProject()) {
+            Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
+            return;
+        }
+
+        await openLog();
+        await log('========== 构建插件 🔨 ==========');
+
+        const pluginPath = getPluginPath();
+
+        try {
+            await log('[插件] 正在编译...');
+            try {
+                await runCommand('npm run build', pluginPath);
+            } catch {
+                await log('[插件] 依赖缺失，正在安装...');
+                await runCommand('npm install --ignore-scripts', pluginPath);
+                await runCommand('npm run build', pluginPath);
+            }
+            await log('[插件] 编译完成', 'success');
+            await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
+            await log('========== 构建完成 ✅ ==========', 'success');
+        } catch (e: any) {
+            await log(`[插件] 编译失败：${e.message}`, 'error');
+        }
+    },
 };
 
 export const load = function () {
