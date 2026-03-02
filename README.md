@@ -57,6 +57,20 @@ git commit -m "feat: 添加 framework 编辑器插件"
 
 安装完成后，重新打开 Cocos Creator，插件会自动加载。
 
+### 命令行更新
+
+在项目根目录执行更新脚本，自动更新框架和插件到最新稳定版本：
+
+```bash
+bash extensions/framework-plugin/update.sh
+```
+
+更新脚本会自动执行：
+
+1. 拉取 `cocos-framework` 最新 Tag 并切换
+2. 拉取 `cocos-framework-plugin` 最新 Tag 并切换
+3. 显示版本变更信息和提交提示
+
 ---
 
 ## 🧩 功能菜单
@@ -278,6 +292,7 @@ cocos-framework-plugin/ (本仓库)
 │   ├── zh.ts                  ← 中文
 │   └── en.ts                  ← 英文
 ├── install.sh                 ← 一键安装脚本
+├── update.sh                  ← 一键更新脚本
 └── README.md                  ← 本文件
 ```
 
