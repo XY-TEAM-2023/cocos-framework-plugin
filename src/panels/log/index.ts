@@ -1,13 +1,13 @@
 /**
  * 框架管理 - 日志面板
  * 实时显示框架操作的执行日志，置顶显示
- * 支持提交信息输入
+ * 支持提交信息输入（多行 textarea）
  */
 
 const logLines: Array<{ time: string; type: string; message: string }> = [];
 let logContainer: HTMLElement | null = null;
 let commitInputArea: HTMLElement | null = null;
-let commitInput: HTMLInputElement | null = null;
+let commitInput: HTMLTextAreaElement | null = null;
 let currentTarget: string = '';
 
 export const template = `
@@ -18,11 +18,11 @@ export const template = `
     </div>
     <div id="log-container" style="flex: 1; overflow-y: auto; padding: 8px 12px; line-height: 1.6;"></div>
     <div id="commit-input-area" style="display: none; padding: 8px 12px; background: #2d2d2d; border-top: 1px solid #404040;">
-        <div style="margin-bottom: 6px; color: #569cd6; font-weight: bold;">📝 提交信息：</div>
-        <div style="display: flex; gap: 8px;">
-            <input id="commit-input" type="text" placeholder="请输入提交信息..." style="flex: 1; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 10px; font-size: 12px; outline: none; font-family: 'Courier New', monospace;" />
-            <button id="btn-commit" style="background: #0e639c; color: #fff; border: none; border-radius: 3px; padding: 6px 16px; cursor: pointer; font-size: 12px; white-space: nowrap;">推送</button>
-            <button id="btn-cancel" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 12px; cursor: pointer; font-size: 12px; white-space: nowrap;">取消</button>
+        <div id="input-label" style="margin-bottom: 6px; color: #569cd6; font-weight: bold;">📝 提交信息：</div>
+        <textarea id="commit-input" rows="3" placeholder="请输入提交信息..." style="width: 100%; box-sizing: border-box; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 10px; font-size: 12px; outline: none; font-family: 'Courier New', monospace; resize: vertical;"></textarea>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+            <button id="btn-cancel" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 12px; cursor: pointer; font-size: 12px;">取消</button>
+            <button id="btn-commit" style="background: #0e639c; color: #fff; border: none; border-radius: 3px; padding: 6px 16px; cursor: pointer; font-size: 12px;">推送</button>
         </div>
     </div>
 </div>
@@ -54,6 +54,7 @@ export const $ = {
     'commit-input': '#commit-input',
     'btn-commit': '#btn-commit',
     'btn-cancel': '#btn-cancel',
+    'input-label': '#input-label',
 };
 
 function getColorForType(type: string): string {
@@ -87,7 +88,7 @@ function renderLog(entry: { time: string; type: string; message: string }): stri
 export function ready(this: any) {
     logContainer = this.$['log-container'] as HTMLElement;
     commitInputArea = this.$['commit-input-area'] as HTMLElement;
-    commitInput = this.$['commit-input'] as HTMLInputElement;
+    commitInput = this.$['commit-input'] as HTMLTextAreaElement;
     const btnCopy = this.$['btn-copy'] as HTMLElement;
     const btnCommit = this.$['btn-commit'] as HTMLElement;
     const btnCancel = this.$['btn-cancel'] as HTMLElement;
@@ -103,7 +104,7 @@ export function ready(this: any) {
         }
     });
 
-    // 推送按钮
+    // 推送/切换按钮
     btnCommit.addEventListener('click', () => {
         const msg = commitInput?.value?.trim() || '';
         if (!msg) {
@@ -128,13 +129,10 @@ export function ready(this: any) {
         currentTarget = '';
     });
 
-    // 输入框回车
+    // textarea 输入时清除红色边框
     if (commitInput) {
-        commitInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        commitInput.addEventListener('input', () => {
             if (commitInput) commitInput.style.borderColor = '#555';
-            if (e.key === 'Enter') {
-                btnCommit.click();
-            }
         });
     }
 
@@ -152,18 +150,13 @@ export function close() {
 }
 
 export const methods = {
-    /**
-     * 追加日志
-     */
     appendLog(dataStr: string) {
         try {
             const entry = JSON.parse(dataStr);
             logLines.push(entry);
-
             if (logLines.length > 500) {
                 logLines.splice(0, logLines.length - 500);
             }
-
             if (logContainer) {
                 const div = document.createElement('div');
                 div.innerHTML = renderLog(entry);
@@ -175,40 +168,34 @@ export const methods = {
         }
     },
 
-    /**
-     * 显示提交信息输入框
-     */
     showCommitInput(target: string) {
         currentTarget = target;
-        if (commitInputArea) {
-            commitInputArea.style.display = 'block';
-        }
+        const label = commitInputArea?.querySelector('#input-label') as HTMLElement;
+        if (label) label.textContent = '📝 提交信息：';
+        if (commitInputArea) commitInputArea.style.display = 'block';
         if (commitInput) {
             commitInput.value = '';
-            commitInput.placeholder = '请输入提交信息...';
+            commitInput.rows = 3;
+            commitInput.placeholder = '请输入提交信息（支持多行）...';
             commitInput.style.borderColor = '#555';
             commitInput.focus();
         }
-        // 更新按钮文本
         const btnCommit = commitInputArea?.querySelector('#btn-commit') as HTMLElement;
         if (btnCommit) btnCommit.textContent = '推送';
     },
 
-    /**
-     * 显示 hash 输入框（切换版本用）
-     */
     showHashInput() {
         currentTarget = 'switch-version';
-        if (commitInputArea) {
-            commitInputArea.style.display = 'block';
-        }
+        const label = commitInputArea?.querySelector('#input-label') as HTMLElement;
+        if (label) label.textContent = '🔀 输入 commit hash：';
+        if (commitInputArea) commitInputArea.style.display = 'block';
         if (commitInput) {
             commitInput.value = '';
+            commitInput.rows = 1;
             commitInput.placeholder = '请输入 commit hash（7位短hash）...';
             commitInput.style.borderColor = '#555';
             commitInput.focus();
         }
-        // 更新按钮文本
         const btnCommit = commitInputArea?.querySelector('#btn-commit') as HTMLElement;
         if (btnCommit) btnCommit.textContent = '切换';
     },

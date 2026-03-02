@@ -2,7 +2,7 @@
 /**
  * 框架管理 - 日志面板
  * 实时显示框架操作的执行日志，置顶显示
- * 支持提交信息输入
+ * 支持提交信息输入（多行 textarea）
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.methods = exports.close = exports.ready = exports.$ = exports.style = exports.template = void 0;
@@ -19,11 +19,11 @@ exports.template = `
     </div>
     <div id="log-container" style="flex: 1; overflow-y: auto; padding: 8px 12px; line-height: 1.6;"></div>
     <div id="commit-input-area" style="display: none; padding: 8px 12px; background: #2d2d2d; border-top: 1px solid #404040;">
-        <div style="margin-bottom: 6px; color: #569cd6; font-weight: bold;">📝 提交信息：</div>
-        <div style="display: flex; gap: 8px;">
-            <input id="commit-input" type="text" placeholder="请输入提交信息..." style="flex: 1; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 10px; font-size: 12px; outline: none; font-family: 'Courier New', monospace;" />
-            <button id="btn-commit" style="background: #0e639c; color: #fff; border: none; border-radius: 3px; padding: 6px 16px; cursor: pointer; font-size: 12px; white-space: nowrap;">推送</button>
-            <button id="btn-cancel" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 12px; cursor: pointer; font-size: 12px; white-space: nowrap;">取消</button>
+        <div id="input-label" style="margin-bottom: 6px; color: #569cd6; font-weight: bold;">📝 提交信息：</div>
+        <textarea id="commit-input" rows="3" placeholder="请输入提交信息..." style="width: 100%; box-sizing: border-box; background: #3c3c3c; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 10px; font-size: 12px; outline: none; font-family: 'Courier New', monospace; resize: vertical;"></textarea>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+            <button id="btn-cancel" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 6px 12px; cursor: pointer; font-size: 12px;">取消</button>
+            <button id="btn-commit" style="background: #0e639c; color: #fff; border: none; border-radius: 3px; padding: 6px 16px; cursor: pointer; font-size: 12px;">推送</button>
         </div>
     </div>
 </div>
@@ -53,6 +53,7 @@ exports.$ = {
     'commit-input': '#commit-input',
     'btn-commit': '#btn-commit',
     'btn-cancel': '#btn-cancel',
+    'input-label': '#input-label',
 };
 function getColorForType(type) {
     switch (type) {
@@ -96,7 +97,7 @@ function ready() {
             });
         }
     });
-    // 推送按钮
+    // 推送/切换按钮
     btnCommit.addEventListener('click', () => {
         var _a;
         const msg = ((_a = commitInput === null || commitInput === void 0 ? void 0 : commitInput.value) === null || _a === void 0 ? void 0 : _a.trim()) || '';
@@ -124,14 +125,11 @@ function ready() {
             commitInputArea.style.display = 'none';
         currentTarget = '';
     });
-    // 输入框回车
+    // textarea 输入时清除红色边框
     if (commitInput) {
-        commitInput.addEventListener('keydown', (e) => {
+        commitInput.addEventListener('input', () => {
             if (commitInput)
                 commitInput.style.borderColor = '#555';
-            if (e.key === 'Enter') {
-                btnCommit.click();
-            }
         });
     }
     // 渲染已有日志
@@ -148,9 +146,6 @@ function close() {
 }
 exports.close = close;
 exports.methods = {
-    /**
-     * 追加日志
-     */
     appendLog(dataStr) {
         try {
             const entry = JSON.parse(dataStr);
@@ -169,40 +164,38 @@ exports.methods = {
             console.error('[框架管理] 日志解析失败', e);
         }
     },
-    /**
-     * 显示提交信息输入框
-     */
     showCommitInput(target) {
         currentTarget = target;
-        if (commitInputArea) {
+        const label = commitInputArea === null || commitInputArea === void 0 ? void 0 : commitInputArea.querySelector('#input-label');
+        if (label)
+            label.textContent = '📝 提交信息：';
+        if (commitInputArea)
             commitInputArea.style.display = 'block';
-        }
         if (commitInput) {
             commitInput.value = '';
-            commitInput.placeholder = '请输入提交信息...';
+            commitInput.rows = 3;
+            commitInput.placeholder = '请输入提交信息（支持多行）...';
             commitInput.style.borderColor = '#555';
             commitInput.focus();
         }
-        // 更新按钮文本
         const btnCommit = commitInputArea === null || commitInputArea === void 0 ? void 0 : commitInputArea.querySelector('#btn-commit');
         if (btnCommit)
             btnCommit.textContent = '推送';
     },
-    /**
-     * 显示 hash 输入框（切换版本用）
-     */
     showHashInput() {
         currentTarget = 'switch-version';
-        if (commitInputArea) {
+        const label = commitInputArea === null || commitInputArea === void 0 ? void 0 : commitInputArea.querySelector('#input-label');
+        if (label)
+            label.textContent = '🔀 输入 commit hash：';
+        if (commitInputArea)
             commitInputArea.style.display = 'block';
-        }
         if (commitInput) {
             commitInput.value = '';
+            commitInput.rows = 1;
             commitInput.placeholder = '请输入 commit hash（7位短hash）...';
             commitInput.style.borderColor = '#555';
             commitInput.focus();
         }
-        // 更新按钮文本
         const btnCommit = commitInputArea === null || commitInputArea === void 0 ? void 0 : commitInputArea.querySelector('#btn-commit');
         if (btnCommit)
             btnCommit.textContent = '切换';

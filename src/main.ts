@@ -295,8 +295,18 @@ export const methods: { [key: string]: (...args: any) => any } = {
     async doPublishFramework(commitMsg: string) {
         const fwPath = getFrameworkPath();
         try {
-            const msg = commitMsg || 'feat: 更新框架';
-            await log(`[框架] 正在提交：${msg}`);
+            const msg = (commitMsg || 'feat: 更新框架').replace(/\n/g, ' ');
+
+            // 输出变更内容
+            const diff = await runCommand('git diff --stat', fwPath).catch(() => '');
+            if (diff) {
+                await log('[框架] 变更内容：');
+                for (const line of diff.split('\n')) {
+                    await log(`[框架]   ${line}`);
+                }
+            }
+
+            await log(`[框架] 提交信息：${msg}`);
             await runCommand('git add .', fwPath);
             await runCommand(`git commit -m "${msg}"`, fwPath);
             await log('[框架] 变更已提交', 'success');
@@ -359,13 +369,22 @@ export const methods: { [key: string]: (...args: any) => any } = {
     async doPublishPlugin(commitMsg: string) {
         const pluginPath = getPluginPath();
         try {
-            const msg = commitMsg || 'feat: 更新插件';
+            const msg = (commitMsg || 'feat: 更新插件').replace(/\n/g, ' ');
 
             await log('[插件] 正在编译...');
-            await runCommand('npm run build', pluginPath);
+            await runCommand('npx tsc -b', pluginPath);
             await log('[插件] 编译完成', 'success');
 
-            await log(`[插件] 正在提交：${msg}`);
+            // 输出变更内容
+            const diff = await runCommand('git diff --stat', pluginPath).catch(() => '');
+            if (diff) {
+                await log('[插件] 变更内容：');
+                for (const line of diff.split('\n')) {
+                    await log(`[插件]   ${line}`);
+                }
+            }
+
+            await log(`[插件] 提交信息：${msg}`);
             await runCommand('git add .', pluginPath);
             await runCommand(`git commit -m "${msg}"`, pluginPath);
             await log('[插件] 变更已提交', 'success');
