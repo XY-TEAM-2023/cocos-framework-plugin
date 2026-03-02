@@ -80,6 +80,19 @@ async function getLatestTag(repoPath) {
         return null;
     }
 }
+/**
+ * 获取最新稳定 Tag（不做 fetch，假设已 fetch 过）
+ */
+async function getStableTag(repoPath) {
+    try {
+        const tags = await runCommand("git tag -l 'v*' --sort=-version:refname", repoPath);
+        const stableTags = tags.split('\n').filter(t => /^v\d+\.\d+\.\d+$/.test(t));
+        return stableTags.length > 0 ? stableTags[0] : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
 async function getAllTags(repoPath) {
     try {
         await runCommand('git fetch --tags', repoPath);
@@ -126,43 +139,39 @@ exports.methods = {
      */
     async updateFramework() {
         await openLog();
-        await log('========== 开始更新 ==========');
+        await log('========== 更新框架和插件 ==========');
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
         // --- 更新框架 ---
-        await log('[框架] 开始更新...');
         if (frameworkExists()) {
             try {
-                const currentVersion = await getCurrentVersion(fwPath);
-                await log(`[框架] 当前版本：${currentVersion}`);
-                await log('[框架] 正在拉取远程数据...');
-                const latestTag = await getLatestTag(fwPath);
+                const localVersion = await getCurrentVersion(fwPath);
+                await log(`[框架] 本地：${localVersion}`);
+                await runCommand('git fetch --tags', fwPath);
+                const latestTag = await getStableTag(fwPath);
                 if (latestTag) {
-                    await log(`[框架] 线上最新版本：${latestTag}`);
-                    const currentTag = currentVersion.startsWith('v') ? currentVersion : null;
-                    if (currentTag === latestTag) {
-                        await log(`[框架] 已是最新版本 ${latestTag}`, 'success');
+                    await log(`[框架] 远程：${latestTag}`);
+                    if (localVersion === latestTag) {
+                        await log('[框架] 已是最新', 'success');
                     }
                     else {
                         await runCommand(`git checkout ${latestTag}`, fwPath);
-                        await log(`[框架] 已更新：${currentVersion} → ${latestTag}`, 'success');
+                        await log(`[框架] 已更新 ${localVersion} → ${latestTag}`, 'success');
                     }
                 }
                 else {
+                    const beforeHash = await runCommand('git rev-parse --short HEAD', fwPath);
                     await runCommand('git pull origin main', fwPath).catch(() => { });
-                    const newVersion = await getCurrentVersion(fwPath);
-                    await log(`[框架] 线上最新：${newVersion}（无稳定版本 Tag）`, 'warn');
-                    if (newVersion !== currentVersion) {
-                        await log(`[框架] 已更新：${currentVersion} → ${newVersion}`, 'success');
+                    const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
+                    await log(`[框架] 远程：${afterHash}（无版本 Tag）`);
+                    if (beforeHash !== afterHash) {
+                        await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                     }
                     else {
-                        await log('[框架] 已是最新代码', 'success');
+                        await log('[框架] 已是最新', 'success');
                     }
                 }
-                // 刷新资源数据库
-                await log('[框架] 正在刷新资源数据库...');
                 Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-                await log('[框架] 资源刷新完成', 'success');
             }
             catch (e) {
                 await log(`[框架] 更新失败：${e.message}`, 'error');
@@ -171,37 +180,35 @@ exports.methods = {
         else {
             await log('[框架] 子模块不存在，跳过', 'warn');
         }
-        // --- 分割线 ---
-        await log('------------------------------------');
+        await log('─────────────────────────────');
         // --- 更新插件 ---
-        await log('[插件] 开始更新...');
         try {
-            const pluginVersion = await getCurrentVersion(pluginPath);
-            await log(`[插件] 当前版本：${pluginVersion}`);
-            await log('[插件] 正在拉取远程数据...');
-            const pluginLatest = await getLatestTag(pluginPath);
-            if (pluginLatest) {
-                await log(`[插件] 线上最新版本：${pluginLatest}`);
-                const currentTag = pluginVersion.startsWith('v') ? pluginVersion : null;
-                if (currentTag === pluginLatest) {
-                    await log(`[插件] 已是最新版本 ${pluginLatest}`, 'success');
+            const localVersion = await getCurrentVersion(pluginPath);
+            await log(`[插件] 本地：${localVersion}`);
+            await runCommand('git fetch --tags', pluginPath);
+            const latestTag = await getStableTag(pluginPath);
+            if (latestTag) {
+                await log(`[插件] 远程：${latestTag}`);
+                if (localVersion === latestTag) {
+                    await log('[插件] 已是最新', 'success');
                 }
                 else {
-                    await runCommand(`git checkout ${pluginLatest}`, pluginPath);
-                    await log(`[插件] 已更新：${pluginVersion} → ${pluginLatest}`, 'success');
-                    await log('[插件] 请重启编辑器使插件更新生效', 'warn');
+                    await runCommand(`git checkout ${latestTag}`, pluginPath);
+                    await log(`[插件] 已更新 ${localVersion} → ${latestTag}`, 'success');
+                    await log('[插件] 请重启编辑器生效', 'warn');
                 }
             }
             else {
+                const beforeHash = await runCommand('git rev-parse --short HEAD', pluginPath);
                 await runCommand('git pull origin main', pluginPath).catch(() => { });
-                const newVersion = await getCurrentVersion(pluginPath);
-                await log(`[插件] 线上最新：${newVersion}（无稳定版本 Tag）`, 'warn');
-                if (newVersion !== pluginVersion) {
-                    await log(`[插件] 已更新：${pluginVersion} → ${newVersion}`, 'success');
-                    await log('[插件] 请重启编辑器使插件更新生效', 'warn');
+                const afterHash = await runCommand('git rev-parse --short HEAD', pluginPath);
+                await log(`[插件] 远程：${afterHash}（无版本 Tag）`);
+                if (beforeHash !== afterHash) {
+                    await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
+                    await log('[插件] 请重启编辑器生效', 'warn');
                 }
                 else {
-                    await log('[插件] 已是最新代码', 'success');
+                    await log('[插件] 已是最新', 'success');
                 }
             }
         }
