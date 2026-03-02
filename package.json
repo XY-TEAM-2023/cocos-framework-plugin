@@ -37,13 +37,13 @@
                 "message": "switch-version"
             },
             {
-                "path": "框架",
-                "label": "推送框架版本 🚀",
+                "path": "框架/推送",
+                "label": "框架 🚀",
                 "message": "publish-framework"
             },
             {
-                "path": "框架",
-                "label": "推送插件版本 🔧",
+                "path": "框架/推送",
+                "label": "插件 🔧",
                 "message": "publish-plugin"
             },
             {
