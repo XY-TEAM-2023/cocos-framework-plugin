@@ -138,6 +138,7 @@ exports.methods = {
                 await log('[框架] 正在拉取远程数据...');
                 const latestTag = await getLatestTag(fwPath);
                 if (latestTag) {
+                    await log(`[框架] 线上最新版本：${latestTag}`);
                     const currentTag = currentVersion.startsWith('v') ? currentVersion : null;
                     if (currentTag === latestTag) {
                         await log(`[框架] 已是最新版本 ${latestTag}`, 'success');
@@ -149,7 +150,14 @@ exports.methods = {
                 }
                 else {
                     await runCommand('git pull origin main', fwPath).catch(() => { });
-                    await log('[框架] 已拉取最新代码（无稳定版本 Tag）', 'warn');
+                    const newVersion = await getCurrentVersion(fwPath);
+                    await log(`[框架] 线上最新：${newVersion}（无稳定版本 Tag）`, 'warn');
+                    if (newVersion !== currentVersion) {
+                        await log(`[框架] 已更新：${currentVersion} → ${newVersion}`, 'success');
+                    }
+                    else {
+                        await log('[框架] 已是最新代码', 'success');
+                    }
                 }
                 // 刷新资源数据库
                 await log('[框架] 正在刷新资源数据库...');
@@ -163,6 +171,8 @@ exports.methods = {
         else {
             await log('[框架] 子模块不存在，跳过', 'warn');
         }
+        // --- 分割线 ---
+        await log('------------------------------------');
         // --- 更新插件 ---
         await log('[插件] 开始更新...');
         try {
@@ -171,6 +181,7 @@ exports.methods = {
             await log('[插件] 正在拉取远程数据...');
             const pluginLatest = await getLatestTag(pluginPath);
             if (pluginLatest) {
+                await log(`[插件] 线上最新版本：${pluginLatest}`);
                 const currentTag = pluginVersion.startsWith('v') ? pluginVersion : null;
                 if (currentTag === pluginLatest) {
                     await log(`[插件] 已是最新版本 ${pluginLatest}`, 'success');
@@ -183,7 +194,15 @@ exports.methods = {
             }
             else {
                 await runCommand('git pull origin main', pluginPath).catch(() => { });
-                await log('[插件] 已拉取最新代码', 'success');
+                const newVersion = await getCurrentVersion(pluginPath);
+                await log(`[插件] 线上最新：${newVersion}（无稳定版本 Tag）`, 'warn');
+                if (newVersion !== pluginVersion) {
+                    await log(`[插件] 已更新：${pluginVersion} → ${newVersion}`, 'success');
+                    await log('[插件] 请重启编辑器使插件更新生效', 'warn');
+                }
+                else {
+                    await log('[插件] 已是最新代码', 'success');
+                }
             }
         }
         catch (e) {
