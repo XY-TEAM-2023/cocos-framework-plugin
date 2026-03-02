@@ -1,0 +1,106 @@
+{
+    "package_version": 2,
+    "version": "1.0.0",
+    "name": "framework-plugin",
+    "description": "i18n:framework-plugin.description",
+    "main": "./dist/main.js",
+    "dependencies": {
+        "fs-extra": "^10.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^16.0.1",
+        "@types/fs-extra": "^9.0.5",
+        "typescript": "^4.3.4"
+    },
+    "panels": {
+        "log": {
+            "title": "框架管理 - 日志",
+            "type": "simple",
+            "main": "dist/panels/log",
+            "icon": "dist/panels/log/icon.png",
+            "size": {
+                "min-width": 500,
+                "min-height": 300,
+                "width": 600,
+                "height": 400
+            },
+            "flags": {
+                "alwaysOnTop": true
+            }
+        }
+    },
+    "contributions": {
+        "menu": [
+            {
+                "path": "框架",
+                "label": "初始化框架",
+                "message": "init-framework"
+            },
+            {
+                "path": "框架",
+                "label": "检查更新",
+                "message": "check-update"
+            },
+            {
+                "path": "框架",
+                "label": "更新框架",
+                "message": "update-framework"
+            },
+            {
+                "path": "框架",
+                "label": "切换版本",
+                "message": "switch-version"
+            },
+            {
+                "path": "框架",
+                "label": "当前版本信息",
+                "message": "show-version"
+            },
+            {
+                "path": "框架",
+                "label": "更新插件",
+                "message": "update-plugin"
+            },
+            {
+                "path": "框架",
+                "label": "推送框架版本 🚀",
+                "message": "publish-framework"
+            }
+        ],
+        "messages": {
+            "init-framework": {
+                "methods": ["initFramework"]
+            },
+            "check-update": {
+                "methods": ["checkUpdate"]
+            },
+            "update-framework": {
+                "methods": ["updateFramework"]
+            },
+            "switch-version": {
+                "methods": ["switchVersion"]
+            },
+            "show-version": {
+                "methods": ["showVersion"]
+            },
+            "update-plugin": {
+                "methods": ["updatePlugin"]
+            },
+            "publish-framework": {
+                "methods": ["publishFramework"]
+            },
+            "open-log-panel": {
+                "methods": ["openLogPanel"]
+            },
+            "append-log": {
+                "methods": ["log.appendLog"]
+            }
+        }
+    },
+    "author": "XY-TEAM",
+    "editor": ">=3.4.2",
+    "scripts": {
+        "build": "tsc -b",
+        "watch": "tsc -w"
+    }
+}

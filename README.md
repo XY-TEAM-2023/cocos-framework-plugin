@@ -36,7 +36,7 @@
 
 ## 🚀 安装方式
 
-### 一键安装（推荐）
+### 一键安装
 
 在项目根目录执行安装脚本，自动完成框架和插件的引入：
 
@@ -44,18 +44,28 @@
 curl -fsSL https://raw.githubusercontent.com/XY-TEAM-2023/cocos-framework-plugin/main/install.sh | bash
 ```
 
-### 手动安装
+### 启用插件
+
+安装完成后，需要编译并启用插件：
 
 ```bash
-# 1. 将插件作为子模块添加到项目的 extensions 目录
-git submodule add git@github.com:XY-TEAM-2023/cocos-framework-plugin.git extensions/framework-plugin
-
-# 2. 提交
-git add .gitmodules extensions/framework-plugin
-git commit -m "feat: 添加 framework 编辑器插件"
+# 进入插件目录，安装依赖并编译
+cd extensions/framework-plugin
+npm install
+npm run build
+cd ../..
 ```
 
-安装完成后，重新打开 Cocos Creator，插件会自动加载。
+然后在 Cocos Creator 中：
+
+1. 打开项目
+2. 点击菜单 **扩展 → 扩展管理器**
+3. 在 **项目** 选项卡中找到 `framework-plugin`
+4. 点击 **启用** 按钮
+
+启用后，菜单栏会出现 **「框架」** 菜单。
+
+> 💡 首次安装后需要手动启用。后续打开项目时插件会自动加载。
 
 ### 命令行更新
 
@@ -75,7 +85,7 @@ bash extensions/framework-plugin/update.sh
 
 ## 🧩 功能菜单
 
-插件安装后，在 Cocos Creator 菜单栏会出现 **Framework** 菜单：
+插件安装后，在 Cocos Creator 菜单栏会出现 **「框架」** 菜单：
 
 ```
 ┌─────────────────────────────────────────────┐
