@@ -10,7 +10,7 @@
     },
     "panels": {
         "log": {
-            "title": "框架管理 - 日志",
+            "title": "更新框架",
             "type": "simple",
             "main": "dist/panels/log",
             "size": {
@@ -43,6 +43,11 @@
             },
             {
                 "path": "框架",
+                "label": "推送插件版本 🔧",
+                "message": "publish-plugin"
+            },
+            {
+                "path": "框架",
                 "label": "关于",
                 "message": "show-about"
             }
@@ -56,6 +61,9 @@
             },
             "publish-framework": {
                 "methods": ["publishFramework"]
+            },
+            "publish-plugin": {
+                "methods": ["publishPlugin"]
             },
             "show-about": {
                 "methods": ["showAbout"]

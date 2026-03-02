@@ -11,7 +11,7 @@ exports.template = `
 <div id="log-panel" style="display: flex; flex-direction: column; height: 100%; background: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', monospace; font-size: 12px;">
     <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #2d2d2d; border-bottom: 1px solid #404040;">
         <span style="font-weight: bold; color: #569cd6;">📋 框架管理 - 运行日志</span>
-        <button id="btn-clear" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 2px 10px; cursor: pointer; font-size: 11px;">清空</button>
+        <button id="btn-copy" style="background: #404040; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; padding: 2px 10px; cursor: pointer; font-size: 11px;">复制</button>
     </div>
     <div id="log-container" style="flex: 1; overflow-y: auto; padding: 8px 12px; line-height: 1.6;"></div>
 </div>
@@ -33,7 +33,7 @@ exports.style = `
 `;
 exports.$ = {
     'log-container': '#log-container',
-    'btn-clear': '#btn-clear',
+    'btn-copy': '#btn-copy',
 };
 function getColorForType(type) {
     switch (type) {
@@ -62,21 +62,21 @@ function renderLog(entry) {
 }
 function ready() {
     logContainer = this.$['log-container'];
-    const btnClear = this.$['btn-clear'];
-    // 清空按钮
-    btnClear.addEventListener('click', () => {
-        logLines.length = 0;
-        if (logContainer) {
-            logContainer.innerHTML = '<div style="color: #6a9955; padding: 4px 0;">日志已清空</div>';
+    const btnCopy = this.$['btn-copy'];
+    // 复制按钮
+    btnCopy.addEventListener('click', () => {
+        const text = logLines.map(e => `[${e.time}] ${getPrefixForType(e.type)} ${e.message}`).join('\n');
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => {
+                btnCopy.textContent = '已复制 ✅';
+                setTimeout(() => { btnCopy.textContent = '复制'; }, 1500);
+            });
         }
     });
-    // 渲染已有日志
+    // 渲染已有日志（不显示初始占位文字）
     if (logContainer && logLines.length > 0) {
         logContainer.innerHTML = logLines.map(renderLog).join('');
         logContainer.scrollTop = logContainer.scrollHeight;
-    }
-    else if (logContainer) {
-        logContainer.innerHTML = '<div style="color: #6a9955; padding: 4px 0;">等待操作...</div>';
     }
 }
 exports.ready = ready;
@@ -97,11 +97,9 @@ exports.methods = {
                 logLines.splice(0, logLines.length - 500);
             }
             if (logContainer) {
-                // 追加新日志行
                 const div = document.createElement('div');
                 div.innerHTML = renderLog(entry);
                 logContainer.appendChild(div.firstElementChild);
-                // 自动滚动到底部
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
         }
