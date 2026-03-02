@@ -142,34 +142,22 @@ exports.methods = {
         await log('========== 更新框架和插件 ==========');
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
-        // --- 更新框架 ---
+        // --- 更新框架（基于 main 分支） ---
         if (frameworkExists()) {
             try {
-                const localVersion = await getCurrentVersion(fwPath);
-                await log(`[框架] 本地：${localVersion}`);
-                await runCommand('git fetch --tags', fwPath);
-                const latestTag = await getStableTag(fwPath);
-                if (latestTag) {
-                    await log(`[框架] 远程：${latestTag}`);
-                    if (localVersion === latestTag) {
-                        await log('[框架] 已是最新', 'success');
-                    }
-                    else {
-                        await runCommand(`git checkout ${latestTag}`, fwPath);
-                        await log(`[框架] 已更新 ${localVersion} → ${latestTag}`, 'success');
-                    }
+                const beforeHash = await runCommand('git rev-parse --short HEAD', fwPath);
+                await log(`[框架] 本地：${beforeHash}`);
+                await runCommand('git fetch origin main', fwPath);
+                const remoteHash = await runCommand('git rev-parse --short origin/main', fwPath);
+                await log(`[框架] 远程：${remoteHash}`);
+                if (beforeHash === remoteHash) {
+                    await log('[框架] 已是最新', 'success');
                 }
                 else {
-                    const beforeHash = await runCommand('git rev-parse --short HEAD', fwPath);
-                    await runCommand('git pull origin main', fwPath).catch(() => { });
+                    await runCommand('git checkout main', fwPath).catch(() => { });
+                    await runCommand('git pull origin main', fwPath);
                     const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
-                    await log(`[框架] 远程：${afterHash}（无版本 Tag）`);
-                    if (beforeHash !== afterHash) {
-                        await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
-                    }
-                    else {
-                        await log('[框架] 已是最新', 'success');
-                    }
+                    await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                 }
                 Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
             }
@@ -181,35 +169,22 @@ exports.methods = {
             await log('[框架] 子模块不存在，跳过', 'warn');
         }
         await log('─────────────────────────────');
-        // --- 更新插件 ---
+        // --- 更新插件（基于 main 分支） ---
         try {
-            const localVersion = await getCurrentVersion(pluginPath);
-            await log(`[插件] 本地：${localVersion}`);
-            await runCommand('git fetch --tags', pluginPath);
-            const latestTag = await getStableTag(pluginPath);
-            if (latestTag) {
-                await log(`[插件] 远程：${latestTag}`);
-                if (localVersion === latestTag) {
-                    await log('[插件] 已是最新', 'success');
-                }
-                else {
-                    await runCommand(`git checkout ${latestTag}`, pluginPath);
-                    await log(`[插件] 已更新 ${localVersion} → ${latestTag}`, 'success');
-                    await log('[插件] 请在 扩展管理器 中关闭再开启本插件以生效', 'warn');
-                }
+            const beforeHash = await runCommand('git rev-parse --short HEAD', pluginPath);
+            await log(`[插件] 本地：${beforeHash}`);
+            await runCommand('git fetch origin main', pluginPath);
+            const remoteHash = await runCommand('git rev-parse --short origin/main', pluginPath);
+            await log(`[插件] 远程：${remoteHash}`);
+            if (beforeHash === remoteHash) {
+                await log('[插件] 已是最新', 'success');
             }
             else {
-                const beforeHash = await runCommand('git rev-parse --short HEAD', pluginPath);
-                await runCommand('git pull origin main', pluginPath).catch(() => { });
+                await runCommand('git checkout main', pluginPath).catch(() => { });
+                await runCommand('git pull origin main', pluginPath);
                 const afterHash = await runCommand('git rev-parse --short HEAD', pluginPath);
-                await log(`[插件] 远程：${afterHash}（无版本 Tag）`);
-                if (beforeHash !== afterHash) {
-                    await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
-                    await log('[插件] 请在 扩展管理器 中关闭再开启本插件以生效', 'warn');
-                }
-                else {
-                    await log('[插件] 已是最新', 'success');
-                }
+                await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
+                await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
             }
         }
         catch (e) {
@@ -218,7 +193,7 @@ exports.methods = {
         await log('========== 更新完成 ✅ ==========', 'success');
     },
     /**
-     * 切换框架版本
+     * 切换框架版本（输入 commit hash）
      */
     async switchVersion() {
         await openLog();
@@ -230,34 +205,48 @@ exports.methods = {
         }
         const fwPath = getFrameworkPath();
         try {
-            const tags = await getAllTags(fwPath);
-            if (tags.length === 0) {
-                await log('[框架] 未找到可用的版本 Tag', 'warn');
-                Editor.Dialog.info('未找到可用的版本 Tag');
-                return;
+            const currentHash = await runCommand('git rev-parse --short HEAD', fwPath);
+            const currentMsg = await runCommand('git log -1 --format="%s"', fwPath);
+            await log(`[框架] 当前版本：${currentHash}（${currentMsg}）`);
+            // 拉取最新并显示最近提交供参考
+            await runCommand('git fetch origin main', fwPath);
+            await log('[框架] 最近提交记录：');
+            const recentLogs = await runCommand('git log origin/main -10 --format="%h  %s  (%cr)"', fwPath).catch(() => '');
+            if (recentLogs) {
+                for (const line of recentLogs.split('\n')) {
+                    await log(`[框架]   ${line}`);
+                }
             }
-            const currentVersion = await getCurrentVersion(fwPath);
-            await log(`[框架] 当前版本：${currentVersion}`);
-            await log(`[框架] 可用版本：${tags.join(', ')}`);
-            const displayTags = tags.slice(0, 5);
-            const buttons = [...displayTags, '取消'];
-            const result = await Editor.Dialog.info(`切换框架版本\n\n当前版本：${currentVersion}\n\n请选择要切换的版本：`, { buttons, default: 0, cancel: buttons.length - 1 });
-            const selectedIndex = result.response;
-            if (selectedIndex < displayTags.length) {
-                const targetVersion = displayTags[selectedIndex];
-                await log(`[框架] 正在切换到 ${targetVersion}...`);
-                await runCommand(`git checkout ${targetVersion}`, fwPath);
-                await log(`[框架] 已切换到 ${targetVersion}`, 'success');
-                await log('[框架] 正在刷新资源数据库...');
-                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-                await log('========== 切换完成 ✅ ==========', 'success');
-            }
-            else {
-                await log('已取消', 'warn');
-            }
+            // 通过面板输入框获取hash
+            Editor.Message.send('framework-plugin', 'show-hash-input', '');
+            await log('[框架] 请在日志面板底部输入要切换的 commit hash', 'warn');
         }
         catch (e) {
             await log(`[框架] 切换版本失败：${e.message}`, 'error');
+        }
+    },
+    /**
+     * 执行版本切换（通过控制台或消息调用）
+     */
+    async doSwitchVersion(targetHash) {
+        await openLog();
+        if (!targetHash || typeof targetHash !== 'string') {
+            await log('[框架] 请提供有效的 commit hash', 'error');
+            return;
+        }
+        const fwPath = getFrameworkPath();
+        try {
+            const beforeHash = await runCommand('git rev-parse --short HEAD', fwPath);
+            await log(`[框架] 正在切换 ${beforeHash} → ${targetHash}...`);
+            await runCommand(`git checkout ${targetHash}`, fwPath);
+            const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
+            const msg = await runCommand('git log -1 --format="%s"', fwPath);
+            await log(`[框架] 已切换到 ${afterHash}（${msg}）`, 'success');
+            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+            await log('========== 切换完成 ✅ ==========', 'success');
+        }
+        catch (e) {
+            await log(`[框架] 切换失败：${e.message}`, 'error');
         }
     },
     /**
@@ -289,24 +278,34 @@ exports.methods = {
             }
             const currentVersion = await getCurrentVersion(fwPath);
             await log(`[框架] 当前版本：${currentVersion}`);
-            const result = await Editor.Dialog.info(`推送框架版本\n\n当前版本：${currentVersion}\n变更文件：${changes.length} 个\n\n确认所有变更已测试通过？`, { buttons: ['确认推送', '取消'], default: 0, cancel: 1 });
-            if (result.response !== 0) {
-                await log('[框架] 已取消推送', 'warn');
-                return;
-            }
-            await log('[框架] 正在提交变更...');
+            // 请求输入提交信息
+            Editor.Panel.open('framework-plugin.log');
+            Editor.Message.send('framework-plugin', 'show-commit-input', 'framework');
+            await log('[框架] 请在日志面板底部输入提交信息后点击「推送」', 'warn');
+        }
+        catch (e) {
+            await log(`[框架] 推送失败：${e.message}`, 'error');
+            Editor.Dialog.error(`推送失败\n${e.message}`);
+        }
+    },
+    /**
+     * 执行框架推送（由面板输入触发）
+     */
+    async doPublishFramework(commitMsg) {
+        const fwPath = getFrameworkPath();
+        try {
+            const msg = commitMsg || 'feat: 更新框架';
+            await log(`[框架] 正在提交：${msg}`);
             await runCommand('git add .', fwPath);
-            await runCommand('git commit -m "feat: 更新框架"', fwPath);
+            await runCommand(`git commit -m "${msg}"`, fwPath);
             await log('[框架] 变更已提交', 'success');
             await log('[框架] 正在推送到远程...');
             await runCommand('git push origin main', fwPath);
             await log('[框架] 推送完成', 'success');
             await log('========== 框架推送完成 ✅ ==========', 'success');
-            Editor.Dialog.info('框架推送完成！\n其他项目可以通过「更新框架」获取最新版本。');
         }
         catch (e) {
             await log(`[框架] 推送失败：${e.message}`, 'error');
-            Editor.Dialog.error(`推送失败\n${e.message}`);
         }
     },
     /**
@@ -334,27 +333,37 @@ exports.methods = {
             }
             const currentVersion = await getCurrentVersion(pluginPath);
             await log(`[插件] 当前版本：${currentVersion}`);
-            const result = await Editor.Dialog.info(`推送插件版本\n\n当前版本：${currentVersion}\n变更文件：${changes.length} 个\n\n确认推送？`, { buttons: ['确认推送', '取消'], default: 0, cancel: 1 });
-            if (result.response !== 0) {
-                await log('[插件] 已取消推送', 'warn');
-                return;
-            }
+            // 请求输入提交信息
+            Editor.Panel.open('framework-plugin.log');
+            Editor.Message.send('framework-plugin', 'show-commit-input', 'plugin');
+            await log('[插件] 请在日志面板底部输入提交信息后点击「推送」', 'warn');
+        }
+        catch (e) {
+            await log(`[插件] 推送失败：${e.message}`, 'error');
+            Editor.Dialog.error(`推送失败\n${e.message}`);
+        }
+    },
+    /**
+     * 执行插件推送（由面板输入触发）
+     */
+    async doPublishPlugin(commitMsg) {
+        const pluginPath = getPluginPath();
+        try {
+            const msg = commitMsg || 'feat: 更新插件';
             await log('[插件] 正在编译...');
             await runCommand('npm run build', pluginPath);
             await log('[插件] 编译完成', 'success');
-            await log('[插件] 正在提交变更...');
+            await log(`[插件] 正在提交：${msg}`);
             await runCommand('git add .', pluginPath);
-            await runCommand('git commit -m "feat: 更新插件"', pluginPath);
+            await runCommand(`git commit -m "${msg}"`, pluginPath);
             await log('[插件] 变更已提交', 'success');
             await log('[插件] 正在推送到远程...');
             await runCommand('git push origin main', pluginPath);
             await log('[插件] 推送完成', 'success');
             await log('========== 插件推送完成 ✅ ==========', 'success');
-            Editor.Dialog.info('插件推送完成！\n其他项目可以通过「更新框架」获取最新版本。');
         }
         catch (e) {
             await log(`[插件] 推送失败：${e.message}`, 'error');
-            Editor.Dialog.error(`推送失败\n${e.message}`);
         }
     },
     /**

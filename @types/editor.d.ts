@@ -26,6 +26,7 @@ declare namespace Editor {
 
     interface DialogOptions {
         title?: string;
+        detail?: string;
         buttons?: string[];
         default?: number;
         cancel?: number;
