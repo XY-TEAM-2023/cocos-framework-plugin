@@ -105,6 +105,21 @@ async function openLog() {
     await Editor.Panel.open('framework-plugin.log');
 }
 
+/**
+ * 自动重载插件（先 disable 再 enable）
+ */
+function reloadPlugin() {
+    console.log('[框架管理] 即将重载插件...');
+    Editor.Panel.close('framework-plugin.log');
+    setTimeout(() => {
+        Editor.Message.request('extension', 'disable', 'framework-plugin').then(() => {
+            setTimeout(() => {
+                Editor.Message.request('extension', 'enable', 'framework-plugin');
+            }, 1000);
+        });
+    }, 500);
+}
+
 // ==================== 插件入口 ====================
 
 export const methods: { [key: string]: (...args: any) => any } = {
@@ -118,7 +133,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async updateFramework() {
         await openLog();
-        await log('========== 更新框架和插件 ==========');
+        await log('========== 更新框架和插件1111 ==========');
 
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
@@ -168,7 +183,10 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 await runCommand('git reset --hard origin/main', pluginPath);
                 const afterHash = await runCommand('git rev-parse --short HEAD', pluginPath);
                 await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
-                await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
+                await log('[插件] 正在自动重载插件...', 'warn');
+                await log('========== 更新完成 ✅ ==========', 'success');
+                reloadPlugin();
+                return;
             }
         } catch (e: any) {
             await log(`[插件] 更新失败：${e.message}`, 'error');
@@ -461,8 +479,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 await runCommand('npm run build', pluginPath);
             }
             await log('[插件] 编译完成', 'success');
-            await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
+            await log('[插件] 正在自动重载插件...', 'warn');
             await log('========== 构建完成 ✅ ==========', 'success');
+            reloadPlugin();
         } catch (e: any) {
             await log(`[插件] 编译失败：${e.message}`, 'error');
         }
