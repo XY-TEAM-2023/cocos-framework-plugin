@@ -46,21 +46,11 @@ curl -fsSL https://raw.githubusercontent.com/XY-TEAM-2023/cocos-framework-plugin
 
 ### 启用插件
 
-安装完成后，需要编译并启用插件：
-
-```bash
-# 进入插件目录，安装依赖并编译
-cd extensions/framework-plugin
-npm install
-npm run build
-cd ../..
-```
-
-然后在 Cocos Creator 中：
+安装完成后，在 Cocos Creator 中启用插件：
 
 1. 打开项目
 2. 点击菜单 **扩展 → 扩展管理器**
-3. 在 **项目** 选项卡中找到 `framework-plugin`
+3. 在 **已安装扩展** 选项卡中找到 `framework-plugin`
 4. 点击 **启用** 按钮
 
 启用后，菜单栏会出现 **「框架」** 菜单。
