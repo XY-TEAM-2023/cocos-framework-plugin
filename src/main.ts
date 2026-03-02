@@ -123,7 +123,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
 
-        // --- 更新框架（基于 main 分支） ---
+        // --- 更新框架（基于 main 分支，强制覆盖） ---
         if (frameworkExists()) {
             try {
                 const beforeHash = await runCommand('git rev-parse --short HEAD', fwPath);
@@ -137,7 +137,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
                     await log('[框架] 已是最新', 'success');
                 } else {
                     await runCommand('git checkout main', fwPath).catch(() => {});
-                    await runCommand('git pull origin main', fwPath);
+                    await runCommand('git reset --hard origin/main', fwPath);
                     const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
                     await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                 }
@@ -152,7 +152,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
 
         await log('─────────────────────────────');
 
-        // --- 更新插件（基于 main 分支） ---
+        // --- 更新插件（基于 main 分支，强制覆盖） ---
         try {
             const beforeHash = await runCommand('git rev-parse --short HEAD', pluginPath);
             await log(`[插件] 本地：${beforeHash}`);
@@ -165,7 +165,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 await log('[插件] 已是最新', 'success');
             } else {
                 await runCommand('git checkout main', pluginPath).catch(() => {});
-                await runCommand('git pull origin main', pluginPath);
+                await runCommand('git reset --hard origin/main', pluginPath);
                 const afterHash = await runCommand('git rev-parse --short HEAD', pluginPath);
                 await log(`[插件] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                 await log('[插件] 请在 扩展管理器 中关闭再开启本插件(framework-plugin)以生效', 'warn');
