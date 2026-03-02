@@ -32,7 +32,7 @@
                 "message": "update-framework"
             },
             {
-                "path": "框架",
+                "path": "框架1",
                 "label": "切换框架版本",
                 "message": "switch-version"
             },
