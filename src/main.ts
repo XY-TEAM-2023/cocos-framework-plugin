@@ -371,8 +371,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
         try {
             const msg = (commitMsg || 'feat: 更新插件').replace(/\n/g, ' ');
 
-            await log('[插件] 正在编译...');
-            await runCommand('npx tsc -b', pluginPath);
+            await log('[插件] 正在安装依赖并编译...');
+            await runCommand('npm install --ignore-scripts', pluginPath);
+            await runCommand('npm run build', pluginPath);
             await log('[插件] 编译完成', 'success');
 
             // 输出变更内容
