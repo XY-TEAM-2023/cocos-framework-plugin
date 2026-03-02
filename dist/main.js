@@ -110,6 +110,19 @@ async function log(message, type = 'info') {
     }
     catch (e) { }
 }
+/**
+ * 等待指定时间（ms）
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+/**
+ * 打开日志面板并等待就绪
+ */
+async function openLog() {
+    Editor.Panel.open('framework-plugin.log');
+    await sleep(500);
+}
 // ==================== 插件入口 ====================
 exports.methods = {
     openLogPanel() {
@@ -119,7 +132,7 @@ exports.methods = {
      * 更新框架（同时更新框架和插件，不自动提交）
      */
     async updateFramework() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 开始更新 ==========');
         const fwPath = getFrameworkPath();
         const pluginPath = getPluginPath();
@@ -145,6 +158,10 @@ exports.methods = {
                     await runCommand('git pull origin main', fwPath).catch(() => { });
                     await log('[框架] 已拉取最新代码（无稳定版本 Tag）', 'warn');
                 }
+                // 刷新资源数据库
+                await log('[框架] 正在刷新资源数据库...');
+                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 资源刷新完成', 'success');
             }
             catch (e) {
                 await log(`[框架] 更新失败：${e.message}`, 'error');
@@ -179,18 +196,13 @@ exports.methods = {
         catch (e) {
             await log(`[插件] 更新失败：${e.message}`, 'error');
         }
-        // --- 刷新资源 ---
-        if (frameworkExists()) {
-            await log('[框架] 正在刷新资源数据库...');
-            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-        }
         await log('========== 更新完成 ✅ ==========', 'success');
     },
     /**
      * 切换框架版本
      */
     async switchVersion() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 切换框架版本 ==========');
         if (!frameworkExists()) {
             await log('[框架] 子模块不存在', 'error');
@@ -237,7 +249,7 @@ exports.methods = {
             Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
             return;
         }
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 推送框架版本 🚀 ==========');
         if (!frameworkExists()) {
             await log('[框架] 子模块不存在', 'error');
@@ -286,7 +298,7 @@ exports.methods = {
             Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
             return;
         }
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 推送插件版本 🔧 ==========');
         const pluginPath = getPluginPath();
         try {
@@ -330,7 +342,7 @@ exports.methods = {
      * 关于
      */
     async showAbout() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 关于 ==========');
         try {
             if (frameworkExists()) {

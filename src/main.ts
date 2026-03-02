@@ -85,6 +85,21 @@ async function log(message: string, type: 'info' | 'success' | 'warn' | 'error' 
     } catch (e) {}
 }
 
+/**
+ * 等待指定时间（ms）
+ */
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 打开日志面板并等待就绪
+ */
+async function openLog() {
+    Editor.Panel.open('framework-plugin.log');
+    await sleep(500);
+}
+
 // ==================== 插件入口 ====================
 
 export const methods: { [key: string]: (...args: any) => any } = {
@@ -97,7 +112,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 更新框架（同时更新框架和插件，不自动提交）
      */
     async updateFramework() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 开始更新 ==========');
 
         const fwPath = getFrameworkPath();
@@ -124,6 +139,11 @@ export const methods: { [key: string]: (...args: any) => any } = {
                     await runCommand('git pull origin main', fwPath).catch(() => {});
                     await log('[框架] 已拉取最新代码（无稳定版本 Tag）', 'warn');
                 }
+
+                // 刷新资源数据库
+                await log('[框架] 正在刷新资源数据库...');
+                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 资源刷新完成', 'success');
             } catch (e: any) {
                 await log(`[框架] 更新失败：${e.message}`, 'error');
             }
@@ -156,12 +176,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
             await log(`[插件] 更新失败：${e.message}`, 'error');
         }
 
-        // --- 刷新资源 ---
-        if (frameworkExists()) {
-            await log('[框架] 正在刷新资源数据库...');
-            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-        }
-
         await log('========== 更新完成 ✅ ==========', 'success');
     },
 
@@ -169,7 +183,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 切换框架版本
      */
     async switchVersion() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 切换框架版本 ==========');
 
         if (!frameworkExists()) {
@@ -227,7 +241,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
             return;
         }
 
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 推送框架版本 🚀 ==========');
 
         if (!frameworkExists()) {
@@ -291,7 +305,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
             return;
         }
 
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 推送插件版本 🔧 ==========');
 
         const pluginPath = getPluginPath();
@@ -349,7 +363,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 关于
      */
     async showAbout() {
-        Editor.Panel.open('framework-plugin.log');
+        await openLog();
         await log('========== 关于 ==========');
 
         try {
