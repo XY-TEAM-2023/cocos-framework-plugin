@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 
 // ==================== Git 工具函数 ====================
 
@@ -51,13 +52,12 @@ function isDevProject(): boolean {
  * 检查框架子模块是否存在
  */
 function frameworkExists(): boolean {
-    const fs = require('fs-extra');
     const fwPath = getFrameworkPath();
-    return fs.existsSync(path.join(fwPath, '.git')) || fs.existsSync(fwPath + '/.git');
+    return fs.existsSync(path.join(fwPath, '.git'));
 }
 
 /**
- * 获取当前框架版本（Tag 或 commit）
+ * 获取当前版本（Tag 或 commit hash）
  */
 async function getCurrentVersion(repoPath: string): Promise<string> {
     try {
@@ -105,7 +105,6 @@ async function getAllTags(repoPath: string): Promise<string[]> {
  * 打开日志面板并追加日志
  */
 async function log(message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') {
-    // 同时在控制台输出
     const prefix = '[框架管理]';
     switch (type) {
         case 'success':
@@ -121,7 +120,6 @@ async function log(message: string, type: 'info' | 'success' | 'warn' | 'error' 
             console.log(`${prefix} ${message}`);
     }
 
-    // 发送到日志面板
     try {
         Editor.Message.send('framework-plugin', 'append-log', JSON.stringify({ message, type, time: new Date().toLocaleTimeString() }));
     } catch (e) {
@@ -141,272 +139,136 @@ export const methods: { [key: string]: (...args: any) => any } = {
     },
 
     /**
-     * 初始化框架
-     */
-    async initFramework() {
-        Editor.Panel.open('framework-plugin.log');
-        await log('========== 初始化框架 ==========');
-
-        if (frameworkExists()) {
-            const version = await getCurrentVersion(getFrameworkPath());
-            await log(`框架已初始化，当前版本：${version}`, 'warn');
-            Editor.Dialog.info(`框架已初始化\n当前版本：${version}`);
-            return;
-        }
-
-        const projectPath = getProjectPath();
-
-        try {
-            await log('正在添加框架子模块...');
-            await runCommand(
-                'git submodule add git@github.com:XY-TEAM-2023/cocos-framework.git assets/framework',
-                projectPath
-            );
-            await log('框架子模块添加成功', 'success');
-
-            // 切换到最新稳定版本
-            await log('正在获取最新稳定版本...');
-            const latestTag = await getLatestTag(getFrameworkPath());
-            if (latestTag) {
-                await runCommand(`git checkout ${latestTag}`, getFrameworkPath());
-                await log(`已切换到版本 ${latestTag}`, 'success');
-            } else {
-                await log('未找到稳定版本 Tag，保持在默认分支', 'warn');
-            }
-
-            // 刷新资源数据库
-            await log('正在刷新资源数据库...');
-            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-
-            await log('========== 初始化完成 ✅ ==========', 'success');
-            Editor.Dialog.info('框架初始化完成！\n请在编辑器中查看 assets/framework 目录。');
-
-        } catch (e: any) {
-            await log(`初始化失败：${e.message}`, 'error');
-            Editor.Dialog.error(`框架初始化失败\n${e.message}`);
-        }
-    },
-
-    /**
-     * 检查更新
-     */
-    async checkUpdate() {
-        Editor.Panel.open('framework-plugin.log');
-        await log('========== 检查框架更新 ==========');
-
-        if (!frameworkExists()) {
-            await log('框架未初始化，请先执行「初始化框架」', 'error');
-            return;
-        }
-
-        try {
-            const currentVersion = await getCurrentVersion(getFrameworkPath());
-            await log(`当前版本：${currentVersion}`);
-
-            const latestTag = await getLatestTag(getFrameworkPath());
-            if (!latestTag) {
-                await log('远程仓库未找到稳定版本 Tag', 'warn');
-                return;
-            }
-
-            await log(`最新版本：${latestTag}`);
-
-            const currentTag = currentVersion.startsWith('v') ? currentVersion : null;
-            if (currentTag === latestTag) {
-                await log(`当前已是最新版本 ${latestTag} ✅`, 'success');
-                Editor.Dialog.info(`当前已是最新版本\n${latestTag}`);
-            } else {
-                await log(`发现新版本：${latestTag}（当前：${currentVersion}）`, 'warn');
-                const result = await Editor.Dialog.info(`发现新版本！\n\n当前版本：${currentVersion}\n最新版本：${latestTag}\n\n是否立即更新？`, {
-                    buttons: ['立即更新', '暂不更新'],
-                    default: 0,
-                    cancel: 1,
-                });
-                if (result.response === 0) {
-                    await methods.doUpdateFramework(latestTag);
-                }
-            }
-        } catch (e: any) {
-            await log(`检查更新失败：${e.message}`, 'error');
-        }
-    },
-
-    /**
-     * 更新框架
+     * 更新框架（同时更新框架和插件）
      */
     async updateFramework() {
         Editor.Panel.open('framework-plugin.log');
-        await log('========== 更新框架 ==========');
+        await log('========== 更新框架和插件 ==========');
 
-        if (!frameworkExists()) {
-            await log('框架未初始化，请先执行「初始化框架」', 'error');
-            return;
+        const projectPath = getProjectPath();
+        const fwPath = getFrameworkPath();
+        const pluginPath = getPluginPath();
+
+        // --- 更新框架 ---
+        if (frameworkExists()) {
+            try {
+                const currentVersion = await getCurrentVersion(fwPath);
+                await log(`当前框架版本：${currentVersion}`);
+
+                await log('正在拉取框架最新数据...');
+                const latestTag = await getLatestTag(fwPath);
+
+                if (latestTag) {
+                    const currentTag = currentVersion.startsWith('v') ? currentVersion : null;
+                    if (currentTag === latestTag) {
+                        await log(`框架已是最新版本 ${latestTag} ✅`, 'success');
+                    } else {
+                        await runCommand(`git checkout ${latestTag}`, fwPath);
+                        await log(`框架已更新：${currentVersion} → ${latestTag}`, 'success');
+                    }
+                } else {
+                    await runCommand('git pull origin main', fwPath).catch(() => {});
+                    await log('框架已拉取最新代码（无稳定版本 Tag）', 'warn');
+                }
+            } catch (e: any) {
+                await log(`框架更新失败：${e.message}`, 'error');
+            }
+        } else {
+            await log('框架子模块不存在，跳过框架更新', 'warn');
         }
 
+        // --- 更新插件 ---
         try {
-            const tags = await getAllTags(getFrameworkPath());
-            if (tags.length === 0) {
-                await log('未找到可用的版本 Tag', 'warn');
-                return;
-            }
+            const pluginVersion = await getCurrentVersion(pluginPath);
+            await log(`当前插件版本：${pluginVersion}`);
 
-            const currentVersion = await getCurrentVersion(getFrameworkPath());
-            await log(`当前版本：${currentVersion}`);
-            await log(`可用版本：${tags.slice(0, 10).join(', ')}${tags.length > 10 ? '...' : ''}`);
+            await log('正在拉取插件最新数据...');
+            const pluginLatest = await getLatestTag(pluginPath);
 
-            // 默认选择最新版本
-            const targetVersion = tags[0];
-            const result = await Editor.Dialog.info(`更新框架\n\n当前版本：${currentVersion}\n目标版本：${targetVersion}\n\n是否更新？`, {
-                buttons: ['确认更新', '取消'],
-                default: 0,
-                cancel: 1,
-            });
-
-            if (result.response === 0) {
-                await methods.doUpdateFramework(targetVersion);
+            if (pluginLatest) {
+                const currentTag = pluginVersion.startsWith('v') ? pluginVersion : null;
+                if (currentTag === pluginLatest) {
+                    await log(`插件已是最新版本 ${pluginLatest} ✅`, 'success');
+                } else {
+                    await runCommand(`git checkout ${pluginLatest}`, pluginPath);
+                    await log(`插件已更新：${pluginVersion} → ${pluginLatest}`, 'success');
+                    await log('⚠️ 插件已更新，请重启编辑器使更新生效', 'warn');
+                }
+            } else {
+                await runCommand('git pull origin main', pluginPath).catch(() => {});
+                await log('插件已拉取最新代码', 'success');
             }
         } catch (e: any) {
-            await log(`更新框架失败：${e.message}`, 'error');
+            await log(`插件更新失败：${e.message}`, 'error');
         }
-    },
 
-    /**
-     * 执行框架更新
-     */
-    async doUpdateFramework(targetVersion: string) {
-        try {
-            await log(`正在更新到 ${targetVersion}...`);
-            await runCommand('git fetch --tags', getFrameworkPath());
-            await runCommand(`git checkout ${targetVersion}`, getFrameworkPath());
-            await log(`已切换到 ${targetVersion}`, 'success');
-
+        // --- 刷新资源 ---
+        if (frameworkExists()) {
             await log('正在刷新资源数据库...');
             Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
-
-            await log(`========== 更新完成 ✅ 已更新到 ${targetVersion} ==========`, 'success');
-            Editor.Dialog.info(`更新完成！\n已更新到 ${targetVersion}`);
-
-        } catch (e: any) {
-            await log(`更新失败：${e.message}`, 'error');
-            Editor.Dialog.error(`更新失败\n${e.message}`);
         }
+
+        await log('========== 更新完成 ✅ ==========', 'success');
     },
 
     /**
-     * 切换版本
+     * 切换框架版本
      */
     async switchVersion() {
         Editor.Panel.open('framework-plugin.log');
         await log('========== 切换框架版本 ==========');
 
         if (!frameworkExists()) {
-            await log('框架未初始化，请先执行「初始化框架」', 'error');
+            await log('框架子模块不存在', 'error');
+            Editor.Dialog.error('框架子模块不存在\n请先通过安装脚本引入框架。');
             return;
         }
 
+        const fwPath = getFrameworkPath();
+
         try {
-            const tags = await getAllTags(getFrameworkPath());
+            const tags = await getAllTags(fwPath);
             if (tags.length === 0) {
                 await log('未找到可用的版本 Tag', 'warn');
+                Editor.Dialog.info('未找到可用的版本 Tag');
                 return;
             }
 
-            const currentVersion = await getCurrentVersion(getFrameworkPath());
+            const currentVersion = await getCurrentVersion(fwPath);
             await log(`当前版本：${currentVersion}`);
+            await log(`可用版本：${tags.join(', ')}`);
 
-            const tagList = tags.map(t => `  ${t === currentVersion ? '● ' : '  '}${t}${t === tags[0] ? ' (latest)' : ''}`).join('\n');
-            await log(`可用版本：\n${tagList}`);
+            // 弹出对话框，每个版本一个按钮（最多显示 5 个）
+            const displayTags = tags.slice(0, 5);
+            const buttons = [...displayTags, '取消'];
 
-            // 弹出对话框让用户选择
-            const result = await Editor.Dialog.info(`切换框架版本\n\n当前版本：${currentVersion}\n\n可用版本：\n${tags.slice(0, 10).join('\n')}\n\n请在控制台输入要切换的版本号`, {
-                buttons: ['确定', '取消'],
-                default: 0,
-                cancel: 1,
-            });
+            const result = await Editor.Dialog.info(
+                `切换框架版本\n\n当前版本：${currentVersion}\n\n请选择要切换的版本：`,
+                {
+                    buttons,
+                    default: 0,
+                    cancel: buttons.length - 1,
+                }
+            );
 
-            if (result.response === 0 && tags.length > 0) {
-                // 默认切换到最新版本
-                await methods.doUpdateFramework(tags[0]);
+            const selectedIndex = result.response;
+            if (selectedIndex < displayTags.length) {
+                const targetVersion = displayTags[selectedIndex];
+                await log(`正在切换到 ${targetVersion}...`);
+                await runCommand(`git checkout ${targetVersion}`, fwPath);
+                await log(`已切换到 ${targetVersion}`, 'success');
+
+                await log('正在刷新资源数据库...');
+                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+
+                await log(`========== 切换完成 ✅ ==========`, 'success');
+                Editor.Dialog.info(`已切换到 ${targetVersion}`);
+            } else {
+                await log('已取消', 'warn');
             }
         } catch (e: any) {
             await log(`切换版本失败：${e.message}`, 'error');
-        }
-    },
-
-    /**
-     * 显示当前版本信息
-     */
-    async showVersion() {
-        Editor.Panel.open('framework-plugin.log');
-        await log('========== 版本信息 ==========');
-
-        if (!frameworkExists()) {
-            await log('框架未安装', 'warn');
-            Editor.Dialog.info('框架未安装\n请先执行「初始化框架」');
-            return;
-        }
-
-        try {
-            const version = await getCurrentVersion(getFrameworkPath());
-            const fwPath = getFrameworkPath();
-            const lastCommit = await runCommand('git log -1 --format="%h %s (%ci)"', fwPath);
-
-            await log(`框架版本：${version}`);
-            await log(`框架路径：${fwPath}`);
-            await log(`最近提交：${lastCommit}`);
-            await log(`是否为开发项目：${isDevProject() ? '是' : '否'}`);
-
-            // 插件版本
-            try {
-                const pluginVersion = await getCurrentVersion(getPluginPath());
-                await log(`插件版本：${pluginVersion}`);
-            } catch {
-                await log(`插件版本：未知`);
-            }
-
-            Editor.Dialog.info(`框架版本信息\n\n版本：${version}\n最近提交：${lastCommit}\n开发模式：${isDevProject() ? '是' : '否'}`);
-
-        } catch (e: any) {
-            await log(`获取版本信息失败：${e.message}`, 'error');
-        }
-    },
-
-    /**
-     * 更新插件自身
-     */
-    async updatePlugin() {
-        Editor.Panel.open('framework-plugin.log');
-        await log('========== 更新插件 ==========');
-
-        const pluginPath = getPluginPath();
-
-        try {
-            const currentVersion = await getCurrentVersion(pluginPath);
-            await log(`当前插件版本：${currentVersion}`);
-
-            await log('正在拉取最新代码...');
-            await runCommand('git fetch --tags', pluginPath);
-
-            const latestTag = await getLatestTag(pluginPath);
-            if (latestTag) {
-                const currentTag = currentVersion.startsWith('v') ? currentVersion : null;
-                if (currentTag === latestTag) {
-                    await log(`插件已是最新版本 ${latestTag} ✅`, 'success');
-                    Editor.Dialog.info(`插件已是最新版本\n${latestTag}`);
-                    return;
-                }
-                await runCommand(`git checkout ${latestTag}`, pluginPath);
-                await log(`插件已更新到 ${latestTag}`, 'success');
-            } else {
-                await runCommand('git pull origin main', pluginPath);
-                await log('插件已更新到最新代码', 'success');
-            }
-
-            await log('========== 插件更新完成 ✅ 请重启编辑器生效 ==========', 'success');
-            Editor.Dialog.info('插件更新完成！\n请重启 Cocos Creator 使更新生效。');
-
-        } catch (e: any) {
-            await log(`插件更新失败：${e.message}`, 'error');
+            Editor.Dialog.error(`切换版本失败\n${e.message}`);
         }
     },
 
@@ -423,7 +285,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         await log('========== 推送框架版本 🚀 ==========');
 
         if (!frameworkExists()) {
-            await log('框架未初始化', 'error');
+            await log('框架子模块不存在', 'error');
             return;
         }
 
@@ -487,6 +349,41 @@ export const methods: { [key: string]: (...args: any) => any } = {
             Editor.Dialog.error(`推送失败\n${e.message}`);
         }
     },
+
+    /**
+     * 关于（显示版本信息）
+     */
+    async showAbout() {
+        Editor.Panel.open('framework-plugin.log');
+        await log('========== 关于 ==========');
+
+        try {
+            // 框架版本
+            if (frameworkExists()) {
+                const fwVersion = await getCurrentVersion(getFrameworkPath());
+                const lastCommit = await runCommand('git log -1 --format="%h %s (%ci)"', getFrameworkPath());
+                await log(`框架版本：${fwVersion}`);
+                await log(`框架路径：${getFrameworkPath()}`);
+                await log(`最近提交：${lastCommit}`);
+            } else {
+                await log('框架：未安装', 'warn');
+            }
+
+            // 插件版本
+            const pluginVersion = await getCurrentVersion(getPluginPath());
+            await log(`插件版本：${pluginVersion}`);
+
+            // 项目信息
+            await log(`项目路径：${getProjectPath()}`);
+            await log(`开发模式：${isDevProject() ? '是（推送功能已启用）' : '否'}`);
+
+            const fwVer = frameworkExists() ? await getCurrentVersion(getFrameworkPath()) : '未安装';
+            Editor.Dialog.info(`关于 - 框架管理插件\n\n框架版本：${fwVer}\n插件版本：${pluginVersion}\n开发模式：${isDevProject() ? '是' : '否'}`);
+
+        } catch (e: any) {
+            await log(`获取信息失败：${e.message}`, 'error');
+        }
+    },
 };
 
 /**
@@ -494,8 +391,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
  */
 export const load = function () {
     console.log('[框架管理] 插件已加载');
-
-    // 检查是否为 dev 项目，在控制台输出提示
     if (isDevProject()) {
         console.log('[框架管理] 当前为开发项目，已启用「推送框架版本」功能');
     }
