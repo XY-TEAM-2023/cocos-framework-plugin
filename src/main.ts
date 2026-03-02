@@ -483,7 +483,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async repairFramework() {
         const result = await Editor.Dialog.warn(
-            '修复框架\n\n此操作将丢弃框架和插件的所有本地修改，还原到最后一次提交的状态。\n\n确定要继续吗？',
+            '修复框架\n\n此操作将丢弃框架和插件的所有本地修改。\n\n确定要继续吗？',
             { buttons: ['确认修复', '取消'], default: 0, cancel: 1 }
         );
 
