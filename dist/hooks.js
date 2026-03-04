@@ -154,7 +154,7 @@ async function onAfterBuild(options, result) {
         const fileEntries = [];
         for (const filePath of files) {
             const stat = fs.statSync(filePath);
-            const relativePath = path.relative(buildDest, filePath).split(path.sep).join('/');
+            const relativePath = path.relative(bundleDir, filePath).split(path.sep).join('/');
             const hash = hashFile(filePath);
             fileEntries.push({
                 path: relativePath,

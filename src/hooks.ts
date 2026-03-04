@@ -176,7 +176,7 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
 
         for (const filePath of files) {
             const stat = fs.statSync(filePath);
-            const relativePath = path.relative(buildDest, filePath).split(path.sep).join('/');
+            const relativePath = path.relative(bundleDir, filePath).split(path.sep).join('/');
             const hash = hashFile(filePath);
 
             fileEntries.push({
