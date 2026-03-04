@@ -122,8 +122,8 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async showMd5Warning() {
         await log('警告：检测到远程包输出了带 MD5 的 config.json，不建议勾选 MD5缓存！', 'warn');
-        Editor.Dialog.warn('【打包配置警告】\n\n检测到部分远程 Bundle 生成了带 MD5 的 config.json。\n\n由于目前的资源热更机制依赖自己生成的 Manifest，请在构建面板中**取消勾选对应 Bundle 或是全局的「MD5缓存」选项**，然后再重新构建！', { 
-            title: 'MD5 缓存警告' 
+        Editor.Dialog.error('由于目前机制依赖生成的 Manifest，请在构建面板中取消「MD5缓存」的勾选，然后再重新构建！', { 
+            title: '打包配置警告' 
         });
     },
 
@@ -263,7 +263,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async publishFramework() {
         if (!isDevProject()) {
-            Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
+            Editor.Dialog.warn('无权限');
             return;
         }
 
@@ -343,7 +343,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async publishPlugin() {
         if (!isDevProject()) {
-            Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
+            Editor.Dialog.warn('无权限');
             return;
         }
 
@@ -461,7 +461,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
      */
     async buildPlugin() {
         if (!isDevProject()) {
-            Editor.Dialog.warn('此功能仅在 cocos-framework-dev 项目中可用');
+            Editor.Dialog.warn('无权限');
             return;
         }
 
