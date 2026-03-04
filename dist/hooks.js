@@ -8,6 +8,8 @@
  *   - 入口信息（bundleName、entryScene）
  *   - 构建时间版本号（中国时间 yyMMddHHmmss）
  *   - ed25519 签名
+ *
+ * 并在 Web 构建产物根目录复制 sw-bundle-cache.js。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -37,14 +39,7 @@ exports.onAfterBuild = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
-// ────────────────────────────────────────────
-// ed25519 密钥管理
-// ────────────────────────────────────────────
 const KEY_DIR_NAME = '.manifest-keys';
-/**
- * 获取或生成 ed25519 密钥对
- * 密钥存储在项目根目录的 .manifest-keys/ 目录中
- */
 function getOrCreateKeyPair(projectRoot) {
     const keyDir = path.join(projectRoot, KEY_DIR_NAME);
     const privPath = path.join(keyDir, 'ed25519.pem');
@@ -55,7 +50,6 @@ function getOrCreateKeyPair(projectRoot) {
             publicKey: crypto.createPublicKey(fs.readFileSync(pubPath, 'utf-8')),
         };
     }
-    // 首次生成
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
     if (!fs.existsSync(keyDir)) {
         fs.mkdirSync(keyDir, { recursive: true });
@@ -66,12 +60,6 @@ function getOrCreateKeyPair(projectRoot) {
     console.log(`[Manifest] ⚠️  请将 ${KEY_DIR_NAME}/ 加入 .gitignore 并妥善保管私钥`);
     return { privateKey, publicKey };
 }
-// ────────────────────────────────────────────
-// 工具函数
-// ────────────────────────────────────────────
-/**
- * 递归遍历目录，返回所有文件的绝对路径
- */
 function walkDir(dir) {
     const results = [];
     if (!fs.existsSync(dir))
@@ -88,21 +76,14 @@ function walkDir(dir) {
     }
     return results;
 }
-/**
- * 计算文件的 SHA-256 哈希
- */
 function hashFile(filePath) {
     const data = fs.readFileSync(filePath);
     return crypto.createHash('sha256').update(data).digest('hex');
 }
-/**
- * 生成中国时间格式的版本号：yyMMddHHmmss
- * 例如：260304092000
- */
+/** 生成中国时间格式版本号：yyMMddHHmmss */
 function buildVersion() {
-    // 使用中国标准时间 (UTC+8)
     const now = new Date();
-    const cnOffset = 8 * 60; // 分钟
+    const cnOffset = 8 * 60;
     const utc = now.getTime() + now.getTimezoneOffset() * 60000;
     const cnTime = new Date(utc + cnOffset * 60000);
     const yy = String(cnTime.getFullYear()).slice(-2);
@@ -113,49 +94,48 @@ function buildVersion() {
     const ss = String(cnTime.getSeconds()).padStart(2, '0');
     return `${yy}${MM}${dd}${HH}${mm}${ss}`;
 }
-/**
- * 对 manifest JSON 内容（不含 signature 字段）进行 ed25519 签名
- */
 function signManifest(payload, privateKey) {
     const signature = crypto.sign(null, Buffer.from(payload, 'utf-8'), privateKey);
     return signature.toString('base64');
 }
-/**
- * 从场景列表中查找入口场景的显示名
- */
 function getEntrySceneName(startSceneUuid, scenes) {
     if (!scenes || !startSceneUuid)
         return '';
     for (const s of scenes) {
         if (s.uuid === startSceneUuid) {
-            // url 格式通常为 "db://assets/xxx/SceneName.scene"
-            const baseName = path.basename(s.url, '.scene');
-            return baseName;
+            return path.basename(s.url, '.scene');
         }
     }
     return '';
 }
-// ────────────────────────────────────────────
-// Build Hook
-// ────────────────────────────────────────────
+function copyServiceWorker(buildDest) {
+    const distName = path.basename(buildDest);
+    if (!/^web-/i.test(distName) && distName !== 'web') {
+        return;
+    }
+    const src = path.resolve(__dirname, '../runtime/sw-bundle-cache.js');
+    if (!fs.existsSync(src)) {
+        console.warn(`[Manifest] 未找到 SW 模板，跳过复制: ${src}`);
+        return;
+    }
+    const dest = path.join(buildDest, 'sw-bundle-cache.js');
+    fs.copyFileSync(src, dest);
+    console.log(`[Manifest] ✅ 已复制 Service Worker: ${dest}`);
+}
 async function onAfterBuild(options, result) {
     var _a, _b;
     console.log('[Manifest] ========== onAfterBuild: 开始生成 manifest ==========');
-    // 确定输出根目录
     const buildDest = (result === null || result === void 0 ? void 0 : result.dest) || path.join(options.buildPath, options.outputName);
     const remoteDir = path.join(buildDest, 'remote');
     if (!fs.existsSync(remoteDir)) {
         console.log('[Manifest] 未检测到 remote 目录，跳过 manifest 生成');
+        copyServiceWorker(buildDest);
         return;
     }
-    // 获取项目根路径（从构建路径向上推断）
-    // buildDest 通常为 <project>/build/<platform>
     const projectRoot = path.resolve(buildDest, '..', '..');
     const keyPair = getOrCreateKeyPair(projectRoot);
-    // 入口场景信息
     const entrySceneName = getEntrySceneName(options.startScene, options.scenes);
     const version = buildVersion();
-    // 扫描 remote 下的每个 bundle 目录
     const bundleDirs = fs.readdirSync(remoteDir, { withFileTypes: true })
         .filter(d => d.isDirectory())
         .map(d => d.name);
@@ -164,17 +144,12 @@ async function onAfterBuild(options, result) {
     for (const bundleName of bundleDirs) {
         const bundleDir = path.join(remoteDir, bundleName);
         const allFiles = walkDir(bundleDir);
-        // 检测是否有带 MD5 后缀的 config.json (例如 config.26c77.json)
-        const hasMd5Config = allFiles.some(f => {
-            const basename = path.basename(f);
-            return /^config\.[0-9a-fA-F]+\.json$/.test(basename);
-        });
+        const hasMd5Config = allFiles.some((f) => /^config\.[0-9a-fA-F]+\.json$/.test(path.basename(f)));
         if (hasMd5Config) {
             md5Detected = true;
             console.warn(`[Manifest] ⚠️ 检测到 Bundle [${bundleName}] 开启了 MD5 缓存！`);
         }
-        // 排除已有的 manifest.json
-        const files = allFiles.filter(f => path.basename(f) !== 'manifest.json');
+        const files = allFiles.filter((f) => path.basename(f) !== 'manifest.json');
         let totalBytes = 0;
         const fileEntries = [];
         for (const filePath of files) {
@@ -188,32 +163,34 @@ async function onAfterBuild(options, result) {
             });
             totalBytes += stat.size;
         }
-        // 构造 manifest 对象（不含 signature）
         const manifest = {
             version,
             entry: {
                 bundleName,
                 entryScene: entrySceneName,
             },
+            summary: {
+                totalFiles: fileEntries.length,
+                totalBytes,
+                hashAlgorithm: 'sha256',
+            },
             files: fileEntries,
         };
-        // 签名
-        const payloadStr = JSON.stringify(manifest, null, 2);
-        manifest.signature = signManifest(payloadStr, keyPair.privateKey);
-        // 写入 manifest.json
+        const payload = JSON.stringify(manifest, null, 2);
+        manifest.signature = signManifest(payload, keyPair.privateKey);
         const manifestPath = path.join(bundleDir, 'manifest.json');
         fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
         console.log(`[Manifest] ✅ ${bundleName}/manifest.json （${fileEntries.length} 个文件, ${(totalBytes / 1024).toFixed(1)} KB）`);
     }
     if (md5Detected) {
         try {
-            // 向主进程发送消息以弹出警告对话框
             (_b = (_a = globalThis.Editor) === null || _a === void 0 ? void 0 : _a.Message) === null || _b === void 0 ? void 0 : _b.send('framework-plugin', 'show-md5-warning');
         }
         catch (e) {
             console.error('[Manifest] 发送 MD5 警告失败', e);
         }
     }
+    copyServiceWorker(buildDest);
     console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
 }
 exports.onAfterBuild = onAfterBuild;
