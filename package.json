@@ -1,119 +1,150 @@
 {
-    "package_version": 2,
-    "version": "1.0.0",
-    "name": "framework-plugin",
-    "description": "i18n:framework-plugin.description",
-    "main": "./dist/main.js",
-    "devDependencies": {
-        "@types/node": "^16.0.1",
-        "typescript": "^4.3.4"
-    },
-    "panels": {
-        "log": {
-            "title": "更新框架",
-            "type": "simple",
-            "main": "dist/panels/log",
-            "size": {
-                "min-width": 500,
-                "min-height": 300,
-                "width": 600,
-                "height": 400
-            },
-            "flags": {
-                "alwaysOnTop": true
-            }
-        }
-    },
-    "contributions": {
-        "menu": [
-            {
-                "path": "框架",
-                "label": "更新框架",
-                "message": "update-framework"
-            },
-            {
-                "path": "框架",
-                "label": "切换框架版本",
-                "message": "switch-version"
-            },
-            {
-                "path": "框架",
-                "label": "修复框架",
-                "message": "repair-framework"
-            },
-            {
-                "path": "框架/开发/框架",
-                "label": "推送版本",
-                "message": "publish-framework"
-            },
-            {
-                "path": "框架/开发/插件",
-                "label": "本地构建",
-                "message": "build-plugin"
-            },
-            {
-                "path": "框架/开发/插件",
-                "label": "推送版本",
-                "message": "publish-plugin"
-            },
-            {
-                "path": "框架",
-                "label": "关于",
-                "message": "show-about"
-            }
-        ],
-        "messages": {
-            "update-framework": {
-                "methods": ["updateFramework"]
-            },
-            "switch-version": {
-                "methods": ["switchVersion"]
-            },
-            "do-switch-version": {
-                "methods": ["doSwitchVersion"]
-            },
-            "publish-framework": {
-                "methods": ["publishFramework"]
-            },
-            "do-publish-framework": {
-                "methods": ["doPublishFramework"]
-            },
-            "publish-plugin": {
-                "methods": ["publishPlugin"]
-            },
-            "do-publish-plugin": {
-                "methods": ["doPublishPlugin"]
-            },
-            "show-about": {
-                "methods": ["showAbout"]
-            },
-            "open-log-panel": {
-                "methods": ["openLogPanel"]
-            },
-            "append-log": {
-                "methods": ["log.appendLog"]
-            },
-            "show-commit-input": {
-                "methods": ["log.showCommitInput"]
-            },
-            "show-hash-input": {
-                "methods": ["log.showHashInput"]
-            },
-            "build-plugin": {
-                "methods": ["buildPlugin"]
-            },
-            "set-title": {
-                "methods": ["log.setTitle"]
-            },
-            "repair-framework": {
-                "methods": ["repairFramework"]
-            }
-        }
-    },
-    "author": "XY-TEAM",
-    "editor": ">=3.4.2",
-    "scripts": {
-        "build": "tsc -b",
-        "watch": "tsc -w"
+  "package_version": 2,
+  "version": "1.0.0",
+  "name": "framework-plugin",
+  "description": "i18n:framework-plugin.description",
+  "main": "./dist/main.js",
+  "devDependencies": {
+    "@types/node": "^16.0.1",
+    "typescript": "^4.3.4"
+  },
+  "panels": {
+    "log": {
+      "title": "更新框架",
+      "type": "simple",
+      "main": "dist/panels/log",
+      "size": {
+        "min-width": 500,
+        "min-height": 300,
+        "width": 600,
+        "height": 400
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
     }
+  },
+  "contributions": {
+    "builder": "./dist/builder",
+    "menu": [
+      {
+        "path": "框架",
+        "label": "更新框架",
+        "message": "update-framework"
+      },
+      {
+        "path": "框架",
+        "label": "切换框架版本",
+        "message": "switch-version"
+      },
+      {
+        "path": "框架",
+        "label": "修复框架",
+        "message": "repair-framework"
+      },
+      {
+        "path": "框架/开发/框架",
+        "label": "推送版本",
+        "message": "publish-framework"
+      },
+      {
+        "path": "框架/开发/插件",
+        "label": "本地构建",
+        "message": "build-plugin"
+      },
+      {
+        "path": "框架/开发/插件",
+        "label": "推送版本",
+        "message": "publish-plugin"
+      },
+      {
+        "path": "框架",
+        "label": "关于",
+        "message": "show-about"
+      }
+    ],
+    "messages": {
+      "update-framework": {
+        "methods": [
+          "updateFramework"
+        ]
+      },
+      "switch-version": {
+        "methods": [
+          "switchVersion"
+        ]
+      },
+      "do-switch-version": {
+        "methods": [
+          "doSwitchVersion"
+        ]
+      },
+      "publish-framework": {
+        "methods": [
+          "publishFramework"
+        ]
+      },
+      "do-publish-framework": {
+        "methods": [
+          "doPublishFramework"
+        ]
+      },
+      "publish-plugin": {
+        "methods": [
+          "publishPlugin"
+        ]
+      },
+      "do-publish-plugin": {
+        "methods": [
+          "doPublishPlugin"
+        ]
+      },
+      "show-about": {
+        "methods": [
+          "showAbout"
+        ]
+      },
+      "open-log-panel": {
+        "methods": [
+          "openLogPanel"
+        ]
+      },
+      "append-log": {
+        "methods": [
+          "log.appendLog"
+        ]
+      },
+      "show-commit-input": {
+        "methods": [
+          "log.showCommitInput"
+        ]
+      },
+      "show-hash-input": {
+        "methods": [
+          "log.showHashInput"
+        ]
+      },
+      "build-plugin": {
+        "methods": [
+          "buildPlugin"
+        ]
+      },
+      "set-title": {
+        "methods": [
+          "log.setTitle"
+        ]
+      },
+      "repair-framework": {
+        "methods": [
+          "repairFramework"
+        ]
+      }
+    }
+  },
+  "author": "XY-TEAM",
+  "editor": ">=3.4.2",
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -w"
+  }
 }
