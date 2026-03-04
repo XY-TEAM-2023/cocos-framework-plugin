@@ -157,7 +157,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
                     await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                 }
 
-                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 正在刷新编辑器资源缓存...');
+                await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 编辑器资源缓存已刷新', 'success');
             } catch (e: any) {
                 await log(`[框架] 更新失败：${e.message}`, 'error');
             }
@@ -251,7 +253,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
             const msg = await runCommand('git log -1 --format="%s"', fwPath);
             await log(`[框架] 已切换到 ${afterHash}（${msg}）`, 'success');
 
-            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+            await log('[框架] 正在刷新编辑器资源缓存...');
+            await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+            await log('[框架] 编辑器资源缓存已刷新', 'success');
             await log('========== 切换完成 ✅ ==========', 'success');
         } catch (e: any) {
             await log(`[框架] 切换失败：${e.message}`, 'error');
@@ -562,7 +566,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
             }
         }
 
-        Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+        await log('[框架] 正在刷新编辑器资源缓存...');
+        await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+        await log('[框架] 编辑器资源缓存已刷新', 'success');
         await log('========== 修复完成 ✅ ==========', 'success');
     },
 };

@@ -172,7 +172,9 @@ exports.methods = {
                     const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
                     await log(`[框架] 已更新 ${beforeHash} → ${afterHash}`, 'success');
                 }
-                Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 正在刷新编辑器资源缓存...');
+                await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+                await log('[框架] 编辑器资源缓存已刷新', 'success');
             }
             catch (e) {
                 await log(`[框架] 更新失败：${e.message}`, 'error');
@@ -256,7 +258,9 @@ exports.methods = {
             const afterHash = await runCommand('git rev-parse --short HEAD', fwPath);
             const msg = await runCommand('git log -1 --format="%s"', fwPath);
             await log(`[框架] 已切换到 ${afterHash}（${msg}）`, 'success');
-            Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+            await log('[框架] 正在刷新编辑器资源缓存...');
+            await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+            await log('[框架] 编辑器资源缓存已刷新', 'success');
             await log('========== 切换完成 ✅ ==========', 'success');
         }
         catch (e) {
@@ -536,7 +540,9 @@ exports.methods = {
                 await log(`[插件] 修复失败：${e.message}`, 'error');
             }
         }
-        Editor.Message.send('asset-db', 'refresh-asset', 'db://assets/framework');
+        await log('[框架] 正在刷新编辑器资源缓存...');
+        await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/framework');
+        await log('[框架] 编辑器资源缓存已刷新', 'success');
         await log('========== 修复完成 ✅ ==========', 'success');
     },
 };
