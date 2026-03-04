@@ -138,6 +138,15 @@ exports.methods = {
         Editor.Panel.open('framework-plugin.log');
     },
     /**
+     * 显示 MD5 警告对话框（由 hooks 触发）
+     */
+    async showMd5Warning() {
+        await log('警告：检测到远程包输出了带 MD5 的 config.json，不建议勾选 MD5缓存！', 'warn');
+        Editor.Dialog.warn('【打包配置警告】\n\n检测到部分远程 Bundle 生成了带 MD5 的 config.json。\n\n由于目前的资源热更机制依赖自己生成的 Manifest，请在构建面板中**取消勾选对应 Bundle 或是全局的「MD5缓存」选项**，然后再重新构建！', {
+            title: 'MD5 缓存警告'
+        });
+    },
+    /**
      * 更新框架（同时更新框架和插件，不自动提交）
      */
     async updateFramework() {

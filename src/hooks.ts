@@ -190,9 +190,22 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
 
     console.log(`[Manifest] 检测到 ${bundleDirs.length} 个远程 bundle：${bundleDirs.join(', ')}`);
 
+    let md5Detected = false;
+
     for (const bundleName of bundleDirs) {
         const bundleDir = path.join(remoteDir, bundleName);
         const allFiles = walkDir(bundleDir);
+
+        // 检测是否有带 MD5 后缀的 config.json (例如 config.26c77.json)
+        const hasMd5Config = allFiles.some(f => {
+            const basename = path.basename(f);
+            return /^config\.[0-9a-fA-F]+\.json$/.test(basename);
+        });
+        
+        if (hasMd5Config) {
+            md5Detected = true;
+            console.warn(`[Manifest] ⚠️ 检测到 Bundle [${bundleName}] 开启了 MD5 缓存！`);
+        }
 
         // 排除已有的 manifest.json
         const files = allFiles.filter(f => path.basename(f) !== 'manifest.json');
@@ -236,6 +249,15 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
         const manifestPath = path.join(bundleDir, 'manifest.json');
         fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
         console.log(`[Manifest] ✅ ${bundleName}/manifest.json （${fileEntries.length} 个文件, ${(totalBytes / 1024).toFixed(1)} KB）`);
+    }
+
+    if (md5Detected) {
+        try {
+            // 向主进程发送消息以弹出警告对话框
+            (globalThis as any).Editor?.Message?.send('framework-plugin', 'show-md5-warning');
+        } catch (e) {
+            console.error('[Manifest] 发送 MD5 警告失败', e);
+        }
     }
 
     console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');

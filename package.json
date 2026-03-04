@@ -138,6 +138,11 @@
         "methods": [
           "repairFramework"
         ]
+      },
+      "show-md5-warning": {
+        "methods": [
+          "showMd5Warning"
+        ]
       }
     }
   },
