@@ -137,6 +137,32 @@ function getBundleEntryScene(bundleDir: string): string {
     }
 }
 
+/**
+ * 将 bundle 目录重组为版本化 CDN 结构：
+ *   bundleDir/          →  bundleDir/version     （纯文本，内容为版本号）
+ *                          bundleDir/{version}/   （所有资源文件）
+ */
+function restructureBundleDir(bundleDir: string, version: string): void {
+    const parentDir = path.dirname(bundleDir);
+    const bundleName = path.basename(bundleDir);
+    const tmpDir = path.join(parentDir, `${bundleName}_restructure_tmp`);
+
+    // 1. 将原 bundleDir 整体重命名为临时目录
+    fs.renameSync(bundleDir, tmpDir);
+
+    // 2. 重建 bundleDir 并在其下创建版本号子目录
+    fs.mkdirSync(bundleDir, { recursive: true });
+    const versionDir = path.join(bundleDir, version);
+
+    // 3. 将临时目录移入版本号子目录
+    fs.renameSync(tmpDir, versionDir);
+
+    // 4. 写入 version 文件
+    fs.writeFileSync(path.join(bundleDir, 'version'), version, 'utf-8');
+
+    console.log(`[Manifest] 📁 ${bundleName}/ → ${bundleName}/version + ${bundleName}/${version}/`);
+}
+
 function copyServiceWorker(buildDest: string): void {
     const distName = path.basename(buildDest);
     if (!/^web-/i.test(distName) && distName !== 'web') {
@@ -231,6 +257,9 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
             fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
             console.log(`[Manifest] ✅ ${bundleName}/manifest.json （${fileEntries.length} 个文件, ${(totalBytes / 1024).toFixed(1)} KB）`);
+
+            // 重组目录结构：bundleDir/ → bundleDir/version + bundleDir/{version}/
+            restructureBundleDir(bundleDir, version);
         }
 
         if (md5Detected) {
