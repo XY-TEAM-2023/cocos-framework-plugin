@@ -236,11 +236,18 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
 
             const entryScene = getBundleEntryScene(bundleDir);
 
+            // 提取 config.{hash}.json 中的 MD5 哈希值
+            const dirFiles = fs.readdirSync(bundleDir);
+            const configFileName = dirFiles.find(f => /^config\.[0-9a-fA-F]+\.json$/.test(f)) || '';
+            const md5Match = configFileName.match(/^config\.([0-9a-fA-F]+)\.json$/);
+            const configHash = md5Match ? md5Match[1] : '';
+
             const manifest: Record<string, any> = {
                 version,
                 entry: {
                     bundleName,
                     entryScene,
+                    configHash,
                 },
                 summary: {
                     totalFiles: fileEntries.length,
