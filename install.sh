@@ -64,13 +64,33 @@ fi
 info "当前目录: $(pwd)"
 echo ""
 
+# -------------------- 辅助函数 --------------------
+# 清理残留的子模块目录，确保 git submodule add 可重复执行
+cleanup_submodule() {
+    local sm_path="$1"
+    # 清理 .git/modules 中的残留目录
+    if [ -d ".git/modules/$sm_path" ]; then
+        warn "清理残留的 .git/modules/$sm_path"
+        rm -rf ".git/modules/$sm_path"
+    fi
+    # 清理 .gitmodules 中的残留条目
+    if [ -f ".gitmodules" ] && grep -q "path = $sm_path" .gitmodules 2>/dev/null; then
+        git config -f .gitmodules --remove-section "submodule.$sm_path" 2>/dev/null || true
+    fi
+    # 清理 .git/config 中的残留条目
+    git config --remove-section "submodule.$sm_path" 2>/dev/null || true
+}
+
 # -------------------- 安装框架 --------------------
 info "步骤 1/3：安装框架子模块..."
 
 if [ -d "$FRAMEWORK_PATH" ] && [ -f "$FRAMEWORK_PATH/.git" -o -d "$FRAMEWORK_PATH/.git" ]; then
     warn "框架子模块已存在于 $FRAMEWORK_PATH，跳过"
 else
-    git submodule add "$FRAMEWORK_REPO" "$FRAMEWORK_PATH"
+    # 清理可能残留的子模块信息（支持重复运行）
+    cleanup_submodule "$FRAMEWORK_PATH"
+    [ -d "$FRAMEWORK_PATH" ] && rm -rf "$FRAMEWORK_PATH"
+    git submodule add --force "$FRAMEWORK_REPO" "$FRAMEWORK_PATH"
     success "框架子模块已添加到 $FRAMEWORK_PATH"
 fi
 
@@ -101,7 +121,9 @@ mkdir -p extensions
 if [ -d "$PLUGIN_PATH" ] && [ -f "$PLUGIN_PATH/.git" -o -d "$PLUGIN_PATH/.git" ]; then
     warn "插件子模块已存在于 $PLUGIN_PATH，跳过"
 else
-    git submodule add "$PLUGIN_REPO" "$PLUGIN_PATH"
+    cleanup_submodule "$PLUGIN_PATH"
+    [ -d "$PLUGIN_PATH" ] && rm -rf "$PLUGIN_PATH"
+    git submodule add --force "$PLUGIN_REPO" "$PLUGIN_PATH"
     success "插件子模块已添加到 $PLUGIN_PATH"
 fi
 
