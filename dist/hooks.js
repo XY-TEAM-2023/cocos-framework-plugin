@@ -105,15 +105,17 @@ function signManifest(payload, privateKey) {
     return signature.toString('base64');
 }
 /**
- * 从 bundle 自身的 config.json 中读取场景入口名称
- * config.json 中的 scenes 字段格式：{ "db://assets/.../xxx.scene": number }
+ * 从 bundle 自身的 config*.json 中读取场景入口名称
+ * 开启 MD5 后文件名为 config.{hash}.json
  */
 function getBundleEntryScene(bundleDir) {
-    const configPath = path.join(bundleDir, 'config.json');
-    if (!fs.existsSync(configPath))
+    // 查找 config.json 或 config.{md5}.json
+    const files = fs.readdirSync(bundleDir);
+    const configFile = files.find(f => /^config(\.[0-9a-fA-F]+)?\.json$/.test(f));
+    if (!configFile)
         return '';
     try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const config = JSON.parse(fs.readFileSync(path.join(bundleDir, configFile), 'utf-8'));
         const scenes = config.scenes;
         if (!scenes || typeof scenes !== 'object')
             return '';
@@ -124,7 +126,7 @@ function getBundleEntryScene(bundleDir) {
         return path.basename(sceneUrls[0], '.scene');
     }
     catch (e) {
-        console.warn(`[Manifest] 读取 ${bundleDir}/config.json 失败:`, e);
+        console.warn(`[Manifest] 读取 ${bundleDir}/${configFile} 失败:`, e);
         return '';
     }
 }
@@ -163,7 +165,6 @@ function copyServiceWorker(buildDest) {
     console.log(`[Manifest] ✅ 已复制 Service Worker: ${dest}`);
 }
 async function onAfterBuild(options, result) {
-    var _a, _b;
     try {
         console.log('[Manifest] ========== onAfterBuild: 开始生成 manifest ==========');
         const buildDest = (result === null || result === void 0 ? void 0 : result.dest) || path.join(options.buildPath, options.outputName);
@@ -180,14 +181,13 @@ async function onAfterBuild(options, result) {
             .filter(d => d.isDirectory())
             .map(d => d.name);
         console.log(`[Manifest] 检测到 ${bundleDirs.length} 个远程 bundle：${bundleDirs.join(', ')}`);
-        let md5Detected = false;
         for (const bundleName of bundleDirs) {
             const bundleDir = path.join(remoteDir, bundleName);
             const allFiles = walkDir(bundleDir);
             const hasMd5Config = allFiles.some((f) => /^config\.[0-9a-fA-F]+\.json$/.test(path.basename(f)));
-            if (hasMd5Config) {
-                md5Detected = true;
-                console.warn(`[Manifest] ⚠️ 检测到 Bundle [${bundleName}] 开启了 MD5 缓存！`);
+            if (!hasMd5Config) {
+                console.error(`[Manifest] ❌ Bundle [${bundleName}] 未开启 MD5 缓存！请在构建面板中勾选「MD5 缓存」后重新构建。`);
+                continue;
             }
             const files = allFiles.filter((f) => path.basename(f) !== 'manifest.json');
             let totalBytes = 0;
@@ -224,14 +224,6 @@ async function onAfterBuild(options, result) {
             console.log(`[Manifest] ✅ ${bundleName}/manifest.json （${fileEntries.length} 个文件, ${(totalBytes / 1024).toFixed(1)} KB）`);
             // 重组目录结构：bundleDir/ → bundleDir/version + bundleDir/{version}/
             restructureBundleDir(bundleDir, version);
-        }
-        if (md5Detected) {
-            try {
-                (_b = (_a = globalThis.Editor) === null || _a === void 0 ? void 0 : _a.Message) === null || _b === void 0 ? void 0 : _b.send('framework-plugin', 'show-md5-warning');
-            }
-            catch (e) {
-                console.error('[Manifest] 发送 MD5 警告失败', e);
-            }
         }
         copyServiceWorker(buildDest);
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
