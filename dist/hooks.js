@@ -109,9 +109,9 @@ function signManifest(payload, privateKey) {
  * 开启 MD5 后文件名为 config.{hash}.json
  */
 function getBundleEntryScene(bundleDir) {
-    // 查找 config.json 或 config.{md5}.json
+    // 查找 config.json / config.{md5}.json（Web）或 cc.config.{md5}.json（Android/Native）
     const files = fs.readdirSync(bundleDir);
-    const configFile = files.find(f => /^config(\.[0-9a-fA-F]+)?\.json$/.test(f));
+    const configFile = files.find(f => /^(cc\.)?config(\.[0-9a-fA-F]+)?\.json$/.test(f));
     if (!configFile)
         return '';
     try {
@@ -184,7 +184,8 @@ async function onAfterBuild(options, result) {
         for (const bundleName of bundleDirs) {
             const bundleDir = path.join(remoteDir, bundleName);
             const allFiles = walkDir(bundleDir);
-            const hasMd5Config = allFiles.some((f) => /^config\.[0-9a-fA-F]+\.json$/.test(path.basename(f)));
+            // Web: config.{md5}.json  /  Android·Native: cc.config.{md5}.json
+            const hasMd5Config = allFiles.some((f) => /^(cc\.)?config\.[0-9a-fA-F]+\.json$/.test(path.basename(f)));
             if (!hasMd5Config) {
                 console.error(`[Manifest] ❌ Bundle [${bundleName}] 未开启 MD5 缓存！请在构建面板中勾选「MD5 缓存」后重新构建。`);
                 continue;
@@ -206,8 +207,9 @@ async function onAfterBuild(options, result) {
             const entryScene = getBundleEntryScene(bundleDir);
             // 提取 config.{hash}.json 中的 MD5 哈希值
             const dirFiles = fs.readdirSync(bundleDir);
-            const configFileName = dirFiles.find(f => /^config\.[0-9a-fA-F]+\.json$/.test(f)) || '';
-            const md5Match = configFileName.match(/^config\.([0-9a-fA-F]+)\.json$/);
+            // 兼容 Web（config.{md5}.json）和 Android/Native（cc.config.{md5}.json）
+            const configFileName = dirFiles.find(f => /^(cc\.)?config\.[0-9a-fA-F]+\.json$/.test(f)) || '';
+            const md5Match = configFileName.match(/^(?:cc\.)?config\.([0-9a-fA-F]+)\.json$/);
             const configHash = md5Match ? md5Match[1] : '';
             const manifest = {
                 version,
