@@ -167,14 +167,49 @@ function copyServiceWorker(buildDest) {
 async function onAfterBuild(options, result) {
     try {
         console.log('[Manifest] ========== onAfterBuild: 开始生成 manifest ==========');
+        // ──── 诊断日志: 打印所有可用参数 ────
+        console.log('[Manifest] options keys:', Object.keys(options).join(', '));
+        console.log('[Manifest] options.buildPath:', options.buildPath);
+        console.log('[Manifest] options.outputName:', options.outputName);
+        console.log('[Manifest] options.platform:', options.platform);
+        console.log('[Manifest] options.platformType:', options.platformType);
+        if (result) {
+            console.log('[Manifest] result keys:', Object.keys(result).join(', '));
+            console.log('[Manifest] result.dest:', result.dest);
+        }
+        else {
+            console.log('[Manifest] result is undefined');
+        }
         const buildDest = (result === null || result === void 0 ? void 0 : result.dest) || path.join(options.buildPath, options.outputName);
-        const remoteDir = path.join(buildDest, 'remote');
-        if (!fs.existsSync(remoteDir)) {
+        console.log(`[Manifest] buildDest=${buildDest}`);
+        // 尝试多个候选路径查找 remote 目录
+        const candidates = [
+            path.join(buildDest, 'remote'),
+            path.join(buildDest, 'data', 'remote'), // Native: build/android/data/remote
+        ];
+        console.log('[Manifest] 候选 remote 路径:');
+        for (const c of candidates) {
+            const resolved = path.resolve(c);
+            console.log(`  ${resolved} → ${fs.existsSync(resolved) ? '✅ 存在' : '❌ 不存在'}`);
+        }
+        const remoteDir = candidates.map(c => path.resolve(c)).find(c => fs.existsSync(c));
+        if (!remoteDir) {
             console.log('[Manifest] 未检测到 remote 目录，跳过 manifest 生成');
             copyServiceWorker(buildDest);
             return;
         }
-        const projectRoot = path.resolve(buildDest, '..', '..');
+        console.log(`[Manifest] 使用 remoteDir=${remoteDir}`);
+        // remoteDir 的父级是平台构建目录的 data 或构建根，
+        // 向上查找直到包含 .manifest-keys 或 package.json 的目录
+        // 简化: remoteDir 一定在 build/{platform}/... 下，向上找 build/ 再上一级
+        // Web:     remoteDir = build/web-mobile/remote       → 上2级 = 项目根
+        // Native:  remoteDir = build/android/data/remote     → 上3级 = 项目根
+        let projectRoot = path.resolve(remoteDir, '..', '..');
+        // 如果还没到项目根(没有 package.json)，继续向上
+        while (!fs.existsSync(path.join(projectRoot, 'package.json')) && projectRoot !== path.dirname(projectRoot)) {
+            projectRoot = path.dirname(projectRoot);
+        }
+        console.log(`[Manifest] projectRoot=${projectRoot}`);
         const keyPair = getOrCreateKeyPair(projectRoot);
         const version = buildVersion();
         const bundleDirs = fs.readdirSync(remoteDir, { withFileTypes: true })
