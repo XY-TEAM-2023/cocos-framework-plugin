@@ -220,7 +220,7 @@ function copyToBuildUploadAssets(buildDest: string, projectRoot: string): void {
         // Web 平台：直接复制整个构建目录
         copyDirRecursive(buildDest, targetDir);
         console.log(`[BuildUpload] ✅ 已复制 ${platformName} 构建产物到 ${targetDir}`);
-    } else if (platformName === 'android') {
+    } else if (platformName === 'android' || platformName === 'ios') {
         // Android：将 data/remote 目录复制到 build_upload_assets/android/remote
         const remoteDir = path.join(buildDest, 'data', 'remote');
         if (fs.existsSync(remoteDir)) {
