@@ -164,6 +164,59 @@ function copyServiceWorker(buildDest) {
     fs.copyFileSync(src, dest);
     console.log(`[Manifest] ✅ 已复制 Service Worker: ${dest}`);
 }
+/** 递归复制目录 */
+function copyDirRecursive(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+            copyDirRecursive(srcPath, destPath);
+        }
+        else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+}
+/**
+ * 将构建产物按平台整理到 projectRoot/build_upload_assets/{平台名} 下
+ *
+ * - web-mobile / web-desktop：直接复制整个 buildDest
+ * - android：仅复制 buildDest/data/remote 中的内容
+ * - 其他平台：输出提示暂未完成
+ */
+function copyToBuildUploadAssets(buildDest, projectRoot) {
+    const platformName = path.basename(buildDest);
+    const uploadRoot = path.join(projectRoot, 'build_upload_assets');
+    const targetDir = path.join(uploadRoot, platformName);
+    console.log(`[BuildUpload] 开始整理 ${platformName} 产物到 ${targetDir}`);
+    // 先清空目标目录（如果已存在）
+    if (fs.existsSync(targetDir)) {
+        fs.rmSync(targetDir, { recursive: true, force: true });
+    }
+    if (platformName === 'web-mobile' || platformName === 'web-desktop') {
+        // Web 平台：直接复制整个构建目录
+        copyDirRecursive(buildDest, targetDir);
+        console.log(`[BuildUpload] ✅ 已复制 ${platformName} 构建产物到 ${targetDir}`);
+    }
+    else if (platformName === 'android') {
+        // Android：将 data/remote 目录复制到 build_upload_assets/android/remote
+        const remoteDir = path.join(buildDest, 'data', 'remote');
+        if (fs.existsSync(remoteDir)) {
+            const remoteDest = path.join(targetDir, 'remote');
+            fs.mkdirSync(targetDir, { recursive: true });
+            copyDirRecursive(remoteDir, remoteDest);
+            console.log(`[BuildUpload] ✅ 已复制 android/data/remote 到 ${remoteDest}`);
+        }
+        else {
+            console.warn(`[BuildUpload] ⚠️ 未找到 ${remoteDir}，跳过 android 产物复制`);
+        }
+    }
+    else {
+        console.warn(`[BuildUpload] ⚠️ 暂未完成 ${platformName} 平台的 build_upload_assets 整理`);
+    }
+}
 async function onAfterBuild(options, result) {
     try {
         console.log('[Manifest] ========== onAfterBuild: 开始生成 manifest ==========');
@@ -270,6 +323,8 @@ async function onAfterBuild(options, result) {
         }
         copyServiceWorker(buildDest);
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
+        // 整理构建产物到 build_upload_assets
+        copyToBuildUploadAssets(buildDest, projectRoot);
     }
     catch (err) {
         console.error('[Manifest] ❌ onAfterBuild 执行出错:', err);
