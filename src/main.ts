@@ -1,6 +1,12 @@
 import { exec } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import {
+    loadR2Config, saveR2Config, isR2Configured, createS3Client,
+    testConnection, scanBuildUploadAssets, uploadBundle, deleteVersionDir,
+    checkVersionExists,
+    R2Config, BundleVersionEntry, UploadProgress,
+} from './r2';
 
 // ==================== Git 工具函数 ====================
 
@@ -108,6 +114,10 @@ async function openLog() {
 function setTitle(title: string) {
     Editor.Message.send('framework-plugin', 'set-title', title);
 }
+
+// ==================== R2 上传状态 ====================
+
+let uploadCancelled = false;
 
 // ==================== 插件入口 ====================
 
@@ -571,12 +581,369 @@ export const methods: { [key: string]: (...args: any) => any } = {
         await log('[框架] 编辑器资源缓存已刷新', 'success');
         await log('========== 修复完成 ✅ ==========', 'success');
     },
+
+    // ==================== R2 上传功能 ====================
+
+    /**
+     * 配置 R2（打开配置面板）
+     */
+    async configR2() {
+        await Editor.Panel.open('framework-plugin.r2config');
+
+        // 延迟发送现有配置到面板
+        const projectRoot = getProjectPath();
+        const existing = loadR2Config(projectRoot);
+        if (existing) {
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'load-r2-config', JSON.stringify(existing));
+            }, 300);
+        }
+    },
+
+    /**
+     * 保存 R2 配置（由配置面板触发）
+     */
+    async saveR2ConfigFromPanel(configStr: string) {
+        const projectRoot = getProjectPath();
+        let input: { accountId: string; accessKeyId: string; secretAccessKey: string; bucketName: string };
+        try {
+            input = JSON.parse(configStr);
+        } catch {
+            return;
+        }
+
+        const existing = loadR2Config(projectRoot);
+        const config: R2Config = {
+            accountId: input.accountId,
+            accessKeyId: input.accessKeyId,
+            secretAccessKey: input.secretAccessKey,
+            bucketName: input.bucketName,
+            autoPromptAfterBuild: existing?.autoPromptAfterBuild ?? true,
+        };
+
+        saveR2Config(projectRoot, config);
+        Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
+            text: '✅ 配置已保存',
+            color: '#4ec9b0',
+        }));
+        console.log('[R2] 配置已保存到 .r2config.json');
+    },
+
+    /**
+     * 测试 R2 连接（由配置面板触发）
+     */
+    async testR2Connection(configStr: string) {
+        let input: { accountId: string; accessKeyId: string; secretAccessKey: string; bucketName: string };
+        try {
+            input = JSON.parse(configStr);
+        } catch {
+            return;
+        }
+
+        if (!input.accountId || !input.accessKeyId || !input.secretAccessKey || !input.bucketName) {
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
+                text: '❌ 请先填写所有字段',
+                color: '#f44747',
+                verified: false,
+            }));
+            return;
+        }
+
+        const config: R2Config = { ...input, autoPromptAfterBuild: true };
+        const result = await testConnection(config);
+
+        if (result.success) {
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
+                text: '✅ 连接成功！',
+                color: '#4ec9b0',
+                verified: true,
+            }));
+        } else {
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
+                text: `❌ 连接失败：${result.error}`,
+                color: '#f44747',
+                verified: false,
+            }));
+        }
+    },
+
+    /**
+     * 上传到 R2（手动入口：打开面板选择并上传）
+     */
+    async uploadToR2() {
+        const projectRoot = getProjectPath();
+        const config = loadR2Config(projectRoot);
+
+        if (!isR2Configured(config)) {
+            const result = await Editor.Dialog.warn(
+                'R2 未配置\n\n请先配置 R2 连接信息。',
+                { buttons: ['去配置', '取消'], default: 0, cancel: 1 }
+            );
+            if (result.response === 0) {
+                Editor.Message.send('framework-plugin', 'config-r2');
+            }
+            return;
+        }
+
+        // 扫描 build_upload_assets
+        const entries = scanBuildUploadAssets(projectRoot);
+
+        if (entries.length === 0) {
+            Editor.Dialog.warn('未找到可上传的构建产物\n\n请先执行构建。');
+            return;
+        }
+
+        // 打开上传面板
+        await Editor.Panel.open('framework-plugin.upload');
+
+        // 发送树形数据到面板
+        const treeData = entries.map(e => ({
+            platform: e.platform,
+            bundleName: e.bundleName,
+            version: e.version,
+        }));
+
+        // 延迟发送以确保面板已就绪
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'set-tree-data', JSON.stringify(treeData));
+        }, 300);
+    },
+
+    /**
+     * 执行上传到 R2（由面板触发）
+     */
+    async doUploadToR2(selectionsStr: string) {
+        const projectRoot = getProjectPath();
+        const config = loadR2Config(projectRoot);
+        if (!config || !isR2Configured(config)) {
+            await log('[R2] 配置无效', 'error');
+            return;
+        }
+
+        let selections: Array<{ platform: string; bundleName: string; version: string }>;
+        try {
+            selections = JSON.parse(selectionsStr);
+        } catch {
+            console.error('[R2] 选择数据解析失败');
+            return;
+        }
+
+        uploadCancelled = false;
+        const client = createS3Client(config);
+
+        // 切换面板到上传模式
+        Editor.Message.send('framework-plugin', 'set-uploading', 'true');
+
+        console.log('[R2] ========== 上传到 R2 ☁️ ==========');
+        console.log(`[R2] 选择了 ${selections.length} 个版本`);
+
+        let successCount = 0;
+        let skipCount = 0;
+        let failCount = 0;
+
+        for (const sel of selections) {
+            if (uploadCancelled) break;
+
+            const entry: BundleVersionEntry = {
+                platform: sel.platform,
+                bundleName: sel.bundleName,
+                version: sel.version,
+                localDir: path.join(projectRoot, 'build_upload_assets', sel.platform, 'remote', sel.bundleName, sel.version),
+            };
+
+            console.log(`[R2] 上传 ${sel.platform}/${sel.bundleName}/${sel.version}...`);
+
+            const result = await uploadBundle({
+                client,
+                bucket: config.bucketName,
+                entry,
+                onProgress: (progress: UploadProgress) => {
+                    Editor.Message.send('framework-plugin', 'update-progress', JSON.stringify({
+                        current: progress.current,
+                        total: progress.total,
+                        fileName: `${sel.bundleName}/${progress.fileName}`,
+                        status: progress.status,
+                    }));
+                },
+                isCancelled: () => uploadCancelled,
+            });
+
+            switch (result) {
+                case 'success':
+                    successCount++;
+                    console.log(`[R2] ✅ ${sel.platform}/${sel.bundleName}/${sel.version} 上传成功`);
+                    break;
+                case 'skipped':
+                    skipCount++;
+                    console.log(`[R2] ⏭️ ${sel.platform}/${sel.bundleName}/${sel.version} 已存在，跳过`);
+                    break;
+                case 'cancelled':
+                    console.log(`[R2] 上传已取消`);
+                    break;
+                case 'failed': {
+                    // 询问是否重试
+                    const retry = await Editor.Dialog.warn(
+                        `上传失败\n\n${sel.platform}/${sel.bundleName}/${sel.version}\n\n是否重试？`,
+                        { buttons: ['重试', '停止上传'], default: 0, cancel: 1 }
+                    );
+                    if (retry.response === 0) {
+                        const retryResult = await uploadBundle({
+                            client,
+                            bucket: config.bucketName,
+                            entry,
+                            onProgress: (progress: UploadProgress) => {
+                                Editor.Message.send('framework-plugin', 'update-progress', JSON.stringify({
+                                    current: progress.current,
+                                    total: progress.total,
+                                    fileName: `${sel.bundleName}/${progress.fileName}`,
+                                    status: progress.status,
+                                }));
+                            },
+                            isCancelled: () => uploadCancelled,
+                        });
+                        if (retryResult === 'success') {
+                            successCount++;
+                            console.log(`[R2] ✅ ${sel.platform}/${sel.bundleName}/${sel.version} 重试上传成功`);
+                        } else {
+                            failCount++;
+                            console.log(`[R2] ❌ ${sel.platform}/${sel.bundleName}/${sel.version} 重试仍失败`);
+                            const keyPrefix = `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
+                            await deleteVersionDir(client, config.bucketName, keyPrefix);
+                            console.log(`[R2] 已清理远端不完整版本`);
+                        }
+                    } else {
+                        failCount++;
+                        const keyPrefix = `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
+                        await deleteVersionDir(client, config.bucketName, keyPrefix);
+                        console.log(`[R2] 已清理远端不完整版本`);
+                        uploadCancelled = true;
+                    }
+                    break;
+                }
+            }
+
+            if (uploadCancelled) break;
+        }
+
+        // 恢复面板
+        Editor.Message.send('framework-plugin', 'set-uploading', 'false');
+
+        if (uploadCancelled) {
+            Editor.Message.send('framework-plugin', 'set-upload-error', '上传已取消');
+            console.log('[R2] ========== 上传已取消 ⚠️ ==========');
+        } else {
+            const summary = `✅ ${successCount} 成功，⏭️ ${skipCount} 跳过，❌ ${failCount} 失败`;
+            Editor.Message.send('framework-plugin', 'set-upload-complete', summary);
+            console.log(`[R2] ========== ${summary} ==========`);
+        }
+    },
+
+    /**
+     * 取消上传
+     */
+    cancelUpload() {
+        uploadCancelled = true;
+        console.log('[R2] 用户请求取消上传');
+    },
+
+    /**
+     * 开启构建后自动询问上传 R2
+     */
+    async enableAutoPrompt() {
+        const projectRoot = getProjectPath();
+        const config = loadR2Config(projectRoot) || {
+            accountId: '',
+            accessKeyId: '',
+            secretAccessKey: '',
+            bucketName: '',
+            autoPromptAfterBuild: false,
+        };
+
+        config.autoPromptAfterBuild = true;
+        saveR2Config(projectRoot, config);
+        console.log('[R2] 构建后自动询问上传：✅ 已开启');
+        Editor.Dialog.info('构建后自动询问上传 R2\n\n✅ 已开启', { buttons: ['确定'] });
+    },
+
+    /**
+     * 关闭构建后自动询问上传 R2
+     */
+    async disableAutoPrompt() {
+        const projectRoot = getProjectPath();
+        const config = loadR2Config(projectRoot) || {
+            accountId: '',
+            accessKeyId: '',
+            secretAccessKey: '',
+            bucketName: '',
+            autoPromptAfterBuild: true,
+        };
+
+        config.autoPromptAfterBuild = false;
+        saveR2Config(projectRoot, config);
+        console.log('[R2] 构建后自动询问上传：❌ 已关闭');
+        Editor.Dialog.info('构建后自动询问上传 R2\n\n❌ 已关闭', { buttons: ['确定'] });
+    },
+
+    /**
+     * 构建后自动询问上传（由 hooks 触发）
+     */
+    async promptUploadAfterBuild(buildInfoStr: string) {
+        let buildInfo: { platformName: string; version: string; bundleNames: string[] };
+        try {
+            buildInfo = JSON.parse(buildInfoStr);
+        } catch {
+            console.error('[R2] 构建信息解析失败');
+            return;
+        }
+
+        const projectRoot = getProjectPath();
+        const config = loadR2Config(projectRoot);
+        if (!config || !isR2Configured(config)) {
+            console.log('[R2] R2 未配置，跳过构建后上传询问');
+            return;
+        }
+
+        const bundleList = buildInfo.bundleNames.join(', ');
+        const result = await Editor.Dialog.info(
+            `构建完成\n\n平台：${buildInfo.platformName}\n版本：${buildInfo.version}\nBundle：${bundleList}\n\n是否将本次构建推送到 R2？`,
+            {
+                title: '上传到 R2',
+                buttons: ['上传', '跳过'],
+                default: 0,
+                cancel: 1,
+            }
+        );
+
+        if (result.response !== 0) {
+            console.log('[R2] 用户跳过构建后上传');
+            return;
+        }
+
+        // 构造树形数据并打开上传面板
+        const selections = buildInfo.bundleNames.map(bundleName => ({
+            platform: buildInfo.platformName,
+            bundleName,
+            version: buildInfo.version,
+        }));
+
+        await Editor.Panel.open('framework-plugin.upload');
+
+        // 延迟发送数据到面板
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'set-tree-data', JSON.stringify(selections));
+        }, 300);
+    },
 };
 
 export const load = function () {
     console.log('[框架管理] 插件已加载');
     if (isDevProject()) {
         console.log('[框架管理] 当前为开发项目，已启用推送功能');
+    }
+    // 显示 R2 自动询问状态
+    const config = loadR2Config(getProjectPath());
+    if (config?.autoPromptAfterBuild) {
+        console.log('[框架管理] R2 构建后自动询问上传：已开启');
     }
 };
 

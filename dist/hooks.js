@@ -8,8 +8,6 @@
  *   - 入口信息（bundleName、entryScene）
  *   - 构建时间版本号（中国时间 yyMMddHHmmss）
  *   - ed25519 签名
- *
- * 并在 Web 构建产物根目录复制 sw-bundle-cache.js。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -37,6 +35,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onAfterBuild = void 0;
 const fs = __importStar(require("fs"));
+const r2_1 = require("./r2");
 const path = __importStar(require("path"));
 let crypto;
 try {
@@ -150,20 +149,6 @@ function restructureBundleDir(bundleDir, version) {
     fs.writeFileSync(path.join(bundleDir, 'version'), version, 'utf-8');
     console.log(`[Manifest] 📁 ${bundleName}/ → ${bundleName}/version + ${bundleName}/${version}/`);
 }
-function copyServiceWorker(buildDest) {
-    const distName = path.basename(buildDest);
-    if (!/^web-/i.test(distName) && distName !== 'web') {
-        return;
-    }
-    const src = path.resolve(__dirname, '../runtime/sw-bundle-cache.js');
-    if (!fs.existsSync(src)) {
-        console.warn(`[Manifest] 未找到 SW 模板，跳过复制: ${src}`);
-        return;
-    }
-    const dest = path.join(buildDest, 'sw-bundle-cache.js');
-    fs.copyFileSync(src, dest);
-    console.log(`[Manifest] ✅ 已复制 Service Worker: ${dest}`);
-}
 /** 递归复制目录 */
 function copyDirRecursive(src, dest) {
     fs.mkdirSync(dest, { recursive: true });
@@ -248,7 +233,6 @@ async function onAfterBuild(options, result) {
         const remoteDir = candidates.map(c => path.resolve(c)).find(c => fs.existsSync(c));
         if (!remoteDir) {
             console.log('[Manifest] 未检测到 remote 目录，跳过 manifest 生成');
-            copyServiceWorker(buildDest);
             return;
         }
         console.log(`[Manifest] 使用 remoteDir=${remoteDir}`);
@@ -321,10 +305,25 @@ async function onAfterBuild(options, result) {
             // 重组目录结构：bundleDir/ → bundleDir/version + bundleDir/{version}/
             restructureBundleDir(bundleDir, version);
         }
-        copyServiceWorker(buildDest);
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
         // 整理构建产物到 build_upload_assets
         copyToBuildUploadAssets(buildDest, projectRoot);
+        // 构建后自动询问上传 R2
+        try {
+            const r2Config = (0, r2_1.loadR2Config)(projectRoot);
+            if ((r2Config === null || r2Config === void 0 ? void 0 : r2Config.autoPromptAfterBuild) && (0, r2_1.isR2Configured)(r2Config)) {
+                const platformName = path.basename(buildDest);
+                Editor.Message.send('framework-plugin', 'prompt-upload-after-build', JSON.stringify({
+                    platformName,
+                    version,
+                    bundleNames: bundleDirs,
+                }));
+                console.log('[Manifest] 已触发 R2 上传询问');
+            }
+        }
+        catch (r2Err) {
+            console.warn('[Manifest] R2 上传询问触发失败:', r2Err);
+        }
     }
     catch (err) {
         console.error('[Manifest] ❌ onAfterBuild 执行出错:', err);

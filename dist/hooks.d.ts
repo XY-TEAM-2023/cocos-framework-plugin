@@ -7,8 +7,6 @@
  *   - 入口信息（bundleName、entryScene）
  *   - 构建时间版本号（中国时间 yyMMddHHmmss）
  *   - ed25519 签名
- *
- * 并在 Web 构建产物根目录复制 sw-bundle-cache.js。
  */
 interface IBuildTaskOptions {
     buildPath: string;

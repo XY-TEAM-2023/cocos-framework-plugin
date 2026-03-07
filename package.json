@@ -8,6 +8,9 @@
     "@types/node": "^16.0.1",
     "typescript": "^4.3.4"
   },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.x"
+  },
   "panels": {
     "log": {
       "title": "更新框架",
@@ -18,6 +21,34 @@
         "min-height": 300,
         "width": 600,
         "height": 400
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "upload": {
+      "title": "上传到 R2",
+      "type": "simple",
+      "main": "dist/panels/upload",
+      "size": {
+        "min-width": 450,
+        "min-height": 350,
+        "width": 600,
+        "height": 500
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "r2config": {
+      "title": "配置 R2",
+      "type": "simple",
+      "main": "dist/panels/r2config",
+      "size": {
+        "min-width": 350,
+        "min-height": 300,
+        "width": 420,
+        "height": 380
       },
       "flags": {
         "alwaysOnTop": true
@@ -56,6 +87,26 @@
         "path": "框架/开发/插件",
         "label": "推送版本",
         "message": "publish-plugin"
+      },
+      {
+        "path": "框架/R2",
+        "label": "配置 R2",
+        "message": "config-r2"
+      },
+      {
+        "path": "框架/R2",
+        "label": "上传到 R2",
+        "message": "upload-to-r2"
+      },
+      {
+        "path": "框架/R2",
+        "label": "✅ 开启构建后自动询问上传",
+        "message": "enable-auto-prompt"
+      },
+      {
+        "path": "框架/R2",
+        "label": "❌ 关闭构建后自动询问上传",
+        "message": "disable-auto-prompt"
       },
       {
         "path": "框架",
@@ -142,6 +193,86 @@
       "show-md5-warning": {
         "methods": [
           "showMd5Warning"
+        ]
+      },
+      "config-r2": {
+        "methods": [
+          "configR2"
+        ]
+      },
+      "save-r2-config": {
+        "methods": [
+          "saveR2ConfigFromPanel"
+        ]
+      },
+      "test-r2-connection": {
+        "methods": [
+          "testR2Connection"
+        ]
+      },
+      "load-r2-config": {
+        "methods": [
+          "r2config.loadConfig"
+        ]
+      },
+      "set-r2-config-status": {
+        "methods": [
+          "r2config.setStatus"
+        ]
+      },
+      "upload-to-r2": {
+        "methods": [
+          "uploadToR2"
+        ]
+      },
+      "do-upload-to-r2": {
+        "methods": [
+          "doUploadToR2"
+        ]
+      },
+      "cancel-upload": {
+        "methods": [
+          "cancelUpload"
+        ]
+      },
+      "enable-auto-prompt": {
+        "methods": [
+          "enableAutoPrompt"
+        ]
+      },
+      "disable-auto-prompt": {
+        "methods": [
+          "disableAutoPrompt"
+        ]
+      },
+      "prompt-upload-after-build": {
+        "methods": [
+          "promptUploadAfterBuild"
+        ]
+      },
+      "set-tree-data": {
+        "methods": [
+          "upload.setTreeData"
+        ]
+      },
+      "update-progress": {
+        "methods": [
+          "upload.updateProgress"
+        ]
+      },
+      "set-uploading": {
+        "methods": [
+          "upload.setUploading"
+        ]
+      },
+      "set-upload-complete": {
+        "methods": [
+          "upload.setComplete"
+        ]
+      },
+      "set-upload-error": {
+        "methods": [
+          "upload.setError"
         ]
       }
     }

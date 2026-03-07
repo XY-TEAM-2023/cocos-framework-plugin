@@ -7,12 +7,11 @@
  *   - 入口信息（bundleName、entryScene）
  *   - 构建时间版本号（中国时间 yyMMddHHmmss）
  *   - ed25519 签名
- *
- * 并在 Web 构建产物根目录复制 sw-bundle-cache.js。
  */
 
 
 import * as fs from 'fs';
+import { loadR2Config, isR2Configured } from './r2';
 import * as path from 'path';
 
 let crypto: any;
@@ -165,22 +164,7 @@ function restructureBundleDir(bundleDir: string, version: string): void {
     console.log(`[Manifest] 📁 ${bundleName}/ → ${bundleName}/version + ${bundleName}/${version}/`);
 }
 
-function copyServiceWorker(buildDest: string): void {
-    const distName = path.basename(buildDest);
-    if (!/^web-/i.test(distName) && distName !== 'web') {
-        return;
-    }
 
-    const src = path.resolve(__dirname, '../runtime/sw-bundle-cache.js');
-    if (!fs.existsSync(src)) {
-        console.warn(`[Manifest] 未找到 SW 模板，跳过复制: ${src}`);
-        return;
-    }
-
-    const dest = path.join(buildDest, 'sw-bundle-cache.js');
-    fs.copyFileSync(src, dest);
-    console.log(`[Manifest] ✅ 已复制 Service Worker: ${dest}`);
-}
 
 /** 递归复制目录 */
 function copyDirRecursive(src: string, dest: string): void {
@@ -271,7 +255,6 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
 
         if (!remoteDir) {
             console.log('[Manifest] 未检测到 remote 目录，跳过 manifest 生成');
-            copyServiceWorker(buildDest);
             return;
         }
         console.log(`[Manifest] 使用 remoteDir=${remoteDir}`);
@@ -363,11 +346,26 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
         }
 
 
-        copyServiceWorker(buildDest);
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
 
         // 整理构建产物到 build_upload_assets
         copyToBuildUploadAssets(buildDest, projectRoot);
+
+        // 构建后自动询问上传 R2
+        try {
+            const r2Config = loadR2Config(projectRoot);
+            if (r2Config?.autoPromptAfterBuild && isR2Configured(r2Config)) {
+                const platformName = path.basename(buildDest);
+                Editor.Message.send('framework-plugin', 'prompt-upload-after-build', JSON.stringify({
+                    platformName,
+                    version,
+                    bundleNames: bundleDirs,
+                }));
+                console.log('[Manifest] 已触发 R2 上传询问');
+            }
+        } catch (r2Err) {
+            console.warn('[Manifest] R2 上传询问触发失败:', r2Err);
+        }
     } catch (err) {
         console.error('[Manifest] ❌ onAfterBuild 执行出错:', err);
     }
