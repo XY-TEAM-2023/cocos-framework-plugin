@@ -109,6 +109,20 @@
       "flags": {
         "alwaysOnTop": true
       }
+    },
+    "bundle-versions": {
+      "title": "Bundle 版本管理",
+      "type": "simple",
+      "main": "dist/panels/bundle-versions",
+      "size": {
+        "min-width": 450,
+        "min-height": 400,
+        "width": 550,
+        "height": 550
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
     }
   },
   "contributions": {
@@ -163,6 +177,11 @@
         "path": "框架/R2",
         "label": "❌ 关闭构建后自动询问上传",
         "message": "disable-auto-prompt"
+      },
+      {
+        "path": "框架/Bundle",
+        "label": "版本管理",
+        "message": "manage-bundle-versions"
       },
       {
         "path": "框架",
@@ -455,7 +474,52 @@
         "methods": [
           "pages-cleanup.setCleanupComplete"
         ]
-      }
+      },
+      "manage-bundle-versions": {
+        "methods": [
+          "manageBundleVersions"
+        ]
+      },
+        "load-bundle-platforms": {
+          "methods": [
+            "loadBundlePlatforms"
+          ]
+        },
+        "set-bundle-platforms": {
+          "methods": [
+            "bundle-versions.setBundlePlatforms"
+          ]
+        },
+        "load-bundle-tree-by-platform": {
+          "methods": [
+            "loadBundleTreeByPlatform"
+          ]
+        },
+        "set-bundle-tree": {
+          "methods": [
+            "bundle-versions.setBundleTree"
+          ]
+        },
+        "load-bundle-version-list": {
+          "methods": [
+            "loadBundleVersionList"
+          ]
+        },
+        "set-bundle-version-list": {
+          "methods": [
+            "bundle-versions.setBundleVersionList"
+          ]
+        },
+        "switch-bundle-version": {
+          "methods": [
+            "doSwitchBundleVersion"
+          ]
+        },
+        "switch-bundle-version-result": {
+          "methods": [
+            "bundle-versions.switchBundleVersionResult"
+          ]
+        }
     }
   },
   "author": "XY-TEAM",

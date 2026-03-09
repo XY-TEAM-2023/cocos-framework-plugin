@@ -140,8 +140,10 @@ function getBundleEntryScene(bundleDir: string): string {
 
 /**
  * 将 bundle 目录重组为版本化 CDN 结构：
- *   bundleDir/          →  bundleDir/version     （纯文本，内容为版本号）
- *                          bundleDir/{version}/   （所有资源文件）
+ *   bundleDir/          →  bundleDir/{version}/   （所有资源文件）
+ *
+ * 注意：version 文件不在构建时生成，它是配置文件，
+ * 只在 R2 上存在，由上传流程和 Bundle 版本管理面板维护。
  */
 function restructureBundleDir(bundleDir: string, version: string): void {
     const parentDir = path.dirname(bundleDir);
@@ -158,10 +160,7 @@ function restructureBundleDir(bundleDir: string, version: string): void {
     // 3. 将临时目录移入版本号子目录
     fs.renameSync(tmpDir, versionDir);
 
-    // 4. 写入 version 文件
-    fs.writeFileSync(path.join(bundleDir, 'version'), version, 'utf-8');
-
-    console.log(`[Manifest] 📁 ${bundleName}/ → ${bundleName}/version + ${bundleName}/${version}/`);
+    console.log(`[Manifest] 📁 ${bundleName}/ → ${bundleName}/${version}/`);
 }
 
 

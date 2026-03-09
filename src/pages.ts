@@ -251,7 +251,17 @@ export async function deployFromR2(options: DeployOptions): Promise<{ success: b
         }
         onLog(`[Pages] 全部下载完成`, 'success');
 
-        // 3. 部署到 Pages
+        // 3. 注入 env.json（客户端根据此文件判断运行环境）
+        const envMap: Record<PagesEnvironment, string> = {
+            'production': 'prod',
+            'staging': 'beta',
+            'dev': 'dev',
+        };
+        const appEnv = envMap[env] || 'dev';
+        fs.writeFileSync(path.join(tmpDir, 'env.json'), JSON.stringify({ env: appEnv }));
+        onLog(`[Pages] ✅ 已注入 env.json → { "env": "${appEnv}" }`);
+
+        // 4. 部署到 Pages
         onLog(`[Pages] 正在部署到 Pages (项目: ${projectName}) ...`);
 
         // wrangler 需要 .wrangler/cache 目录

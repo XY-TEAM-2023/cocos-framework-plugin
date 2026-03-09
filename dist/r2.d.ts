@@ -79,3 +79,48 @@ export declare function deleteVersionDir(client: S3Client, bucket: string, prefi
  *   build_upload_assets/{platform}/app/{version}/...              ← 新增：App 产物
  */
 export declare function scanBuildUploadAssets(projectRoot: string): BundleVersionEntry[];
+/**
+ * 列出 R2 上的所有平台
+ * 通过列出根级 CommonPrefixes 获取平台列表
+ */
+export declare function listR2Platforms(client: S3Client, bucket: string): Promise<string[]>;
+/**
+ * 列出指定平台下 remote/ 里的 bundle 名列表
+ */
+export declare function listR2Bundles(client: S3Client, bucket: string, platform: string): Promise<string[]>;
+/**
+ * 列出指定 bundle 的所有版本子目录
+ */
+/**
+ * 列出指定 Bundle 的所有历史版本号 (分页)
+ */
+export declare function listR2BundleVersions(client: S3Client, bucket: string, platform: string, bundleName: string, pageSize?: number, continuationToken?: string): Promise<{
+    versions: string[];
+    nextContinuationToken?: string;
+}>;
+/** 各环境版本信息 */
+export interface BundleVersionInfo {
+    dev?: string;
+    beta?: string;
+    prod?: string;
+}
+/**
+ * 读取指定 bundle 的各环境版本号
+ * 分别从 version_dev、version_beta、version_prod 三个独立文件读取
+ */
+export declare function getR2BundleVersions(client: S3Client, bucket: string, platform: string, bundleName: string): Promise<BundleVersionInfo>;
+/**
+ * 设置指定 bundle 某个环境的版本号
+ * 只写入对应的 version_{env} 文件，不影响其他环境
+ */
+export declare function setR2BundleVersion(client: S3Client, bucket: string, platform: string, bundleName: string, env: 'dev' | 'beta' | 'prod', version: string): Promise<void>;
+/**
+ * [性能优化] 一次性扫描 R2 上所有平台的所有 bundle 的 version_xxx 文件
+ * 返回格式：[ { platform, bundleName, versions: { dev?: string, beta?: string, prod?: string } } ]
+ * 这个函数将 N * M * 3 次 R2 对象请求合并为 1 次 ListObjects 请求 + 批量并发下载文本
+ */
+export declare function listR2AllBundleVersions(client: S3Client, bucket: string, platform?: string): Promise<Array<{
+    platform: string;
+    bundleName: string;
+    versions: BundleVersionInfo;
+}>>;

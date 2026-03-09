@@ -32,7 +32,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scanBuildUploadAssets = exports.deleteVersionDir = exports.uploadBundle = exports.uploadFile = exports.checkVersionExists = exports.testConnection = exports.createS3Client = exports.isR2Configured = exports.saveR2Config = exports.loadR2Config = void 0;
+exports.listR2AllBundleVersions = exports.setR2BundleVersion = exports.getR2BundleVersions = exports.listR2BundleVersions = exports.listR2Bundles = exports.listR2Platforms = exports.scanBuildUploadAssets = exports.deleteVersionDir = exports.uploadBundle = exports.uploadFile = exports.checkVersionExists = exports.testConnection = exports.createS3Client = exports.isR2Configured = exports.saveR2Config = exports.loadR2Config = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const client_s3_1 = require("@aws-sdk/client-s3");
@@ -376,4 +376,232 @@ function scanBuildUploadAssets(projectRoot) {
     return entries;
 }
 exports.scanBuildUploadAssets = scanBuildUploadAssets;
+// ==================== Bundle 版本管理 ====================
+/**
+ * 列出 R2 上的所有平台
+ * 通过列出根级 CommonPrefixes 获取平台列表
+ */
+async function listR2Platforms(client, bucket) {
+    const platforms = new Set();
+    let continuationToken;
+    do {
+        const resp = await client.send(new client_s3_1.ListObjectsV2Command({
+            Bucket: bucket,
+            Delimiter: '/',
+            ContinuationToken: continuationToken,
+        }));
+        if (resp.CommonPrefixes) {
+            for (const cp of resp.CommonPrefixes) {
+                if (cp.Prefix) {
+                    const name = cp.Prefix.replace(/\/$/, '');
+                    if (name)
+                        platforms.add(name);
+                }
+            }
+        }
+        continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+    return Array.from(platforms).sort();
+}
+exports.listR2Platforms = listR2Platforms;
+/**
+ * 列出指定平台下 remote/ 里的 bundle 名列表
+ */
+async function listR2Bundles(client, bucket, platform) {
+    const prefix = `${platform}/remote/`;
+    const bundles = new Set();
+    let continuationToken;
+    do {
+        const resp = await client.send(new client_s3_1.ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            Delimiter: '/',
+            ContinuationToken: continuationToken,
+        }));
+        if (resp.CommonPrefixes) {
+            for (const cp of resp.CommonPrefixes) {
+                if (cp.Prefix) {
+                    const name = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+                    if (name)
+                        bundles.add(name);
+                }
+            }
+        }
+        continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+    return Array.from(bundles).sort();
+}
+exports.listR2Bundles = listR2Bundles;
+/**
+ * 列出指定 bundle 的所有版本子目录
+ */
+/**
+ * 列出指定 Bundle 的所有历史版本号 (分页)
+ */
+async function listR2BundleVersions(client, bucket, platform, bundleName, pageSize = 20, continuationToken) {
+    const prefix = `${platform}/remote/${bundleName}/`;
+    const versions = new Set();
+    let nextToken = continuationToken;
+    let finalNextToken;
+    // 因为 ListObjectsV2 返回的是文件，而版本号是目录名。
+    // 我们需要循环拉取直到凑够 pageSize 个不同的版本号，或者拉完所有文件。
+    do {
+        const resp = await client.send(new client_s3_1.ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            Delimiter: '/',
+            ContinuationToken: nextToken,
+            MaxKeys: Math.max(pageSize * 2, 100), // 尽量多拉一点以覆盖目录前缀
+        }));
+        if (resp.CommonPrefixes) {
+            for (const cp of resp.CommonPrefixes) {
+                if (cp.Prefix) {
+                    const name = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+                    if (name && /^\d+$/.test(name)) {
+                        versions.add(name);
+                    }
+                }
+            }
+        }
+        finalNextToken = resp.NextContinuationToken;
+        nextToken = finalNextToken;
+        // 如果已经凑够了数量，且还有下一页，我们就停止这一轮
+        if (versions.size >= pageSize || !nextToken) {
+            break;
+        }
+    } while (nextToken);
+    const sortedVersions = Array.from(versions).sort().reverse();
+    return {
+        versions: sortedVersions,
+        nextContinuationToken: finalNextToken
+    };
+}
+exports.listR2BundleVersions = listR2BundleVersions;
+/**
+ * 读取指定 bundle 的各环境版本号
+ * 分别从 version_dev、version_beta、version_prod 三个独立文件读取
+ */
+async function getR2BundleVersions(client, bucket, platform, bundleName) {
+    const prefix = `${platform}/remote/${bundleName}`;
+    const envs = ['dev', 'beta', 'prod'];
+    const result = {};
+    await Promise.all(envs.map(async (env) => {
+        var _a, _b;
+        const key = `${prefix}/version_${env}`;
+        try {
+            const resp = await client.send(new client_s3_1.GetObjectCommand({ Bucket: bucket, Key: key }));
+            const text = await ((_a = resp.Body) === null || _a === void 0 ? void 0 : _a.transformToString('utf-8'));
+            if (text === null || text === void 0 ? void 0 : text.trim()) {
+                result[env] = text.trim();
+            }
+        }
+        catch (e) {
+            // 文件不存在则跳过
+            if (e.name !== 'NoSuchKey' && ((_b = e.$metadata) === null || _b === void 0 ? void 0 : _b.httpStatusCode) !== 404) {
+                console.warn(`[R2] 读取 ${key} 失败: ${e.message}`);
+            }
+        }
+    }));
+    return result;
+}
+exports.getR2BundleVersions = getR2BundleVersions;
+/**
+ * 设置指定 bundle 某个环境的版本号
+ * 只写入对应的 version_{env} 文件，不影响其他环境
+ */
+async function setR2BundleVersion(client, bucket, platform, bundleName, env, version) {
+    const key = `${platform}/remote/${bundleName}/version_${env}`;
+    await client.send(new client_s3_1.PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: version,
+        ContentType: 'text/plain',
+    }));
+}
+exports.setR2BundleVersion = setR2BundleVersion;
+/**
+ * [性能优化] 一次性扫描 R2 上所有平台的所有 bundle 的 version_xxx 文件
+ * 返回格式：[ { platform, bundleName, versions: { dev?: string, beta?: string, prod?: string } } ]
+ * 这个函数将 N * M * 3 次 R2 对象请求合并为 1 次 ListObjects 请求 + 批量并发下载文本
+ */
+async function listR2AllBundleVersions(client, bucket, platform) {
+    const map = new Map(); // key: "platform/bundleName"
+    const keysToFetch = [];
+    let continuationToken;
+    const prefix = platform ? `${platform}/remote/` : undefined;
+    // 1. 扫描指定平台（或全库）的所有文件，识别 Bundle 名
+    console.log(`[R2] 开始扫描 ${platform ? '平台: ' + platform : '全库'} 的文件以识别 Bundle...`);
+    do {
+        const resp = await client.send(new client_s3_1.ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+        }));
+        if (resp.Contents) {
+            for (const item of resp.Contents) {
+                if (!item.Key)
+                    continue;
+                // 识别 Bundle 名：{platform}/remote/{bundleName}/...
+                const bundleMatch = item.Key.match(/^([^\/]+)\/remote\/([^\/]+)\//);
+                if (bundleMatch) {
+                    const [, plt, bundleName] = bundleMatch;
+                    const mapKey = `${plt}/${bundleName}`;
+                    if (!map.has(mapKey)) {
+                        map.set(mapKey, {});
+                    }
+                }
+                // 识别版本文件：{platform}/remote/{bundleName}/version_{env}
+                const versionMatch = item.Key.match(/^([^\/]+)\/remote\/([^\/]+)\/version_(dev|beta|prod)$/);
+                if (versionMatch) {
+                    keysToFetch.push(item.Key);
+                }
+            }
+        }
+        continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+    console.log(`[R2] 扫描完成，发现 ${keysToFetch.length} 个环境版本文件，准备开始加载内容...`);
+    // 2. 并发下载所有的 version 文件内容（因为纯文本非常小）
+    let fetchedCount = 0;
+    const fetchPromises = keysToFetch.map(async (key) => {
+        var _a;
+        try {
+            const match = key.match(/^([^\/]+)\/remote\/([^\/]+)\/version_(dev|beta|prod)$/);
+            if (!match)
+                return;
+            const [, platform, bundleName, env] = match;
+            const resp = await client.send(new client_s3_1.GetObjectCommand({ Bucket: bucket, Key: key }));
+            const text = await ((_a = resp.Body) === null || _a === void 0 ? void 0 : _a.transformToString('utf-8'));
+            if (text === null || text === void 0 ? void 0 : text.trim()) {
+                const mapKey = `${platform}/${bundleName}`;
+                if (!map.has(mapKey)) {
+                    map.set(mapKey, {});
+                }
+                map.get(mapKey)[env] = text.trim();
+            }
+            fetchedCount++;
+        }
+        catch (e) {
+            console.warn(`[R2] 读取版本文件失败: ${key}, error=${e.message}`);
+        }
+    });
+    // 控制并发度，避免一次发出几百个请求导致网络阻塞
+    const CONCURRENCY = 20;
+    for (let i = 0; i < fetchPromises.length; i += CONCURRENCY) {
+        await Promise.all(fetchPromises.slice(i, i + CONCURRENCY));
+        console.log(`[R2] 加载内容进度: ${Math.min(i + CONCURRENCY, keysToFetch.length)} / ${keysToFetch.length}`);
+    }
+    // 3. 构建返回数据
+    const result = [];
+    for (const [key, versions] of map.entries()) {
+        const [platform, bundleName] = key.split('/');
+        result.push({ platform, bundleName, versions });
+    }
+    // 按平台/bundle名排序
+    return result.sort((a, b) => {
+        if (a.platform !== b.platform)
+            return a.platform.localeCompare(b.platform);
+        return a.bundleName.localeCompare(b.bundleName);
+    });
+}
+exports.listR2AllBundleVersions = listR2AllBundleVersions;
 //# sourceMappingURL=r2.js.map

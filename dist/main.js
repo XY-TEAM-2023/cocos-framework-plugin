@@ -1230,6 +1230,83 @@ exports.methods = {
             console.error('[Pages] 清理失败', e);
         }
     },
+    // ==================== Bundle 版本管理 ====================
+    async manageBundleVersions() {
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config)) {
+            Editor.Dialog.warn('请先配置 R2', { buttons: ['确定'] });
+            return;
+        }
+        Editor.Panel.open('framework-plugin.bundle-versions');
+    },
+    async loadBundlePlatforms() {
+        console.log('[Bundle版本管理] 正在加载平台列表...');
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config) || !config) {
+            console.error('[Bundle版本管理] R2 未配置');
+            return;
+        }
+        try {
+            const client = (0, r2_1.createS3Client)(config);
+            const platforms = await (0, r2_1.listR2Platforms)(client, config.bucketName);
+            console.log(`[Bundle版本管理] 平台列表加载成功: ${platforms.join(', ')}`);
+            Editor.Message.send('framework-plugin', 'set-bundle-platforms', JSON.stringify(platforms));
+        }
+        catch (e) {
+            console.error('[Bundle版本管理] 加载平台列表失败:', e.message);
+            Editor.Message.send('framework-plugin', 'set-bundle-platforms', '[]');
+        }
+    },
+    async loadBundleTreeByPlatform(platform) {
+        console.log(`[Bundle版本管理] 正在加载平台 ${platform} 的 Bundle 树...`);
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config) || !config) {
+            console.error('[Bundle版本管理] R2 未配置');
+            return;
+        }
+        try {
+            const client = (0, r2_1.createS3Client)(config);
+            const treeData = await (0, r2_1.listR2AllBundleVersions)(client, config.bucketName, platform);
+            console.log(`[Bundle版本管理] 平台 ${platform} 的 Bundle 树加载成功，共 ${treeData.length} 个 Bundle`);
+            Editor.Message.send('framework-plugin', 'set-bundle-tree', JSON.stringify(treeData));
+        }
+        catch (e) {
+            console.error('[Bundle版本管理] 加载Bundle失败:', e.message);
+            Editor.Message.send('framework-plugin', 'set-bundle-tree', '[]');
+        }
+    },
+    async loadBundleVersionList(platform, bundleName) {
+        console.log(`[Bundle版本管理] 正在加载平台 ${platform} Bundle ${bundleName} 的版本列表...`);
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config) || !config) {
+            console.error('[Bundle版本管理] R2 未配置');
+            return;
+        }
+        try {
+            const client = (0, r2_1.createS3Client)(config);
+            const versions = await (0, r2_1.listR2BundleVersions)(client, config.bucketName, platform, bundleName);
+            Editor.Message.send('framework-plugin', 'set-bundle-version-list', JSON.stringify(versions));
+        }
+        catch (e) {
+            console.error('[Bundle版本管理] 加载版本列表失败:', e.message);
+            Editor.Message.send('framework-plugin', 'set-bundle-version-list', '[]');
+        }
+    },
+    async doSwitchBundleVersion(platform, bundleName, env, version) {
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config) || !config)
+            return;
+        try {
+            const client = (0, r2_1.createS3Client)(config);
+            await (0, r2_1.setR2BundleVersion)(client, config.bucketName, platform, bundleName, env, version);
+            console.log(`[Bundle版本管理] ✅ 切换成功: ${platform}/${bundleName} ${env}=${version}`);
+            Editor.Message.send('framework-plugin', 'switch-bundle-version-result', true, '切换成功');
+        }
+        catch (e) {
+            console.error('[Bundle版本管理] 切换失败:', e.message);
+            Editor.Message.send('framework-plugin', 'switch-bundle-version-result', false, e.message);
+        }
+    },
 };
 const load = function () {
     console.log('[框架管理] 插件已加载');
