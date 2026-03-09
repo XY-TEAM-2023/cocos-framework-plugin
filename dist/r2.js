@@ -175,6 +175,7 @@ function guessContentType(filePath) {
         '.wav': 'audio/wav',
         '.css': 'text/css',
         '.html': 'text/html',
+        '.apk': 'application/vnd.android.package-archive',
     };
     return map[ext] || 'application/octet-stream';
 }
@@ -211,12 +212,18 @@ function walkDir(dir) {
  */
 async function uploadBundle(options) {
     const { client, bucket, entry, onProgress, isCancelled } = options;
-    const keyPrefix = `${entry.platform}/remote/${entry.bundleName}/${entry.version}`;
-    // 1. 检查远端版本
-    const existsStatus = await checkVersionExists(client, bucket, entry);
-    if (existsStatus === 'complete') {
-        onProgress === null || onProgress === void 0 ? void 0 : onProgress({ current: 0, total: 0, fileName: '', status: 'skipped' });
-        return 'skipped';
+    // App 产物使用不同的 key 路径
+    const isApp = entry.bundleName === '📦 app';
+    const keyPrefix = isApp
+        ? `${entry.platform}/app/${entry.version}`
+        : `${entry.platform}/remote/${entry.bundleName}/${entry.version}`;
+    // 1. 检查远端版本（App 产物跳过 manifest 版本检查）
+    if (!isApp) {
+        const existsStatus = await checkVersionExists(client, bucket, entry);
+        if (existsStatus === 'complete') {
+            onProgress === null || onProgress === void 0 ? void 0 : onProgress({ current: 0, total: 0, fileName: '', status: 'skipped' });
+            return 'skipped';
+        }
     }
     // 2. 扫描本地文件
     const allFiles = walkDir(entry.localDir);
@@ -319,7 +326,7 @@ exports.deleteVersionDir = deleteVersionDir;
  *
  * 目录结构：
  *   build_upload_assets/{platform}/remote/{bundleName}/{version}/...
- *   build_upload_assets/{platform}/remote/{bundleName}/version  ← 过滤
+ *   build_upload_assets/{platform}/app/{version}/...              ← 新增：App 产物
  */
 function scanBuildUploadAssets(projectRoot) {
     const assetsDir = path.join(projectRoot, 'build_upload_assets');
@@ -331,24 +338,37 @@ function scanBuildUploadAssets(projectRoot) {
         .filter(d => d.isDirectory() && d.name !== '.DS_Store');
     for (const platformEntry of platforms) {
         const platform = platformEntry.name;
+        // ---- 扫描 remote/ (bundle 版本) ----
         const remoteDir = path.join(assetsDir, platform, 'remote');
-        if (!fs.existsSync(remoteDir))
-            continue;
-        // 第二层：bundle 名称
-        const bundles = fs.readdirSync(remoteDir, { withFileTypes: true })
-            .filter(d => d.isDirectory());
-        for (const bundleEntry of bundles) {
-            const bundleName = bundleEntry.name;
-            const bundleDir = path.join(remoteDir, bundleName);
-            // 第三层：版本目录（过滤 version 文件）
-            const versions = fs.readdirSync(bundleDir, { withFileTypes: true })
+        if (fs.existsSync(remoteDir)) {
+            const bundles = fs.readdirSync(remoteDir, { withFileTypes: true })
+                .filter(d => d.isDirectory());
+            for (const bundleEntry of bundles) {
+                const bundleName = bundleEntry.name;
+                const bundleDir = path.join(remoteDir, bundleName);
+                const versions = fs.readdirSync(bundleDir, { withFileTypes: true })
+                    .filter(d => d.isDirectory());
+                for (const versionEntry of versions) {
+                    entries.push({
+                        platform,
+                        bundleName,
+                        version: versionEntry.name,
+                        localDir: path.join(bundleDir, versionEntry.name),
+                    });
+                }
+            }
+        }
+        // ---- 扫描 app/ (App 产物) ----
+        const appDir = path.join(assetsDir, platform, 'app');
+        if (fs.existsSync(appDir)) {
+            const versions = fs.readdirSync(appDir, { withFileTypes: true })
                 .filter(d => d.isDirectory());
             for (const versionEntry of versions) {
                 entries.push({
                     platform,
-                    bundleName,
+                    bundleName: '📦 app',
                     version: versionEntry.name,
-                    localDir: path.join(bundleDir, versionEntry.name),
+                    localDir: path.join(appDir, versionEntry.name),
                 });
             }
         }

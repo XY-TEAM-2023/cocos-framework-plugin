@@ -28,6 +28,7 @@ const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const r2_1 = require("./r2");
+const pages_1 = require("./pages");
 // ==================== Git 工具函数 ====================
 function runCommand(cmd, cwd) {
     return new Promise((resolve, reject) => {
@@ -135,6 +136,8 @@ function setTitle(title) {
 }
 // ==================== R2 上传状态 ====================
 let uploadCancelled = false;
+let _currentSwitchEnv = 'production';
+let _currentCleanupEnv = 'production';
 // ==================== 插件入口 ====================
 exports.methods = {
     openLogPanel() {
@@ -689,11 +692,15 @@ exports.methods = {
         for (const sel of selections) {
             if (uploadCancelled)
                 break;
+            const isApp = sel.bundleName === '📦 app';
+            const localDir = isApp
+                ? path.join(projectRoot, 'build_upload_assets', sel.platform, 'app', sel.version)
+                : path.join(projectRoot, 'build_upload_assets', sel.platform, 'remote', sel.bundleName, sel.version);
             const entry = {
                 platform: sel.platform,
                 bundleName: sel.bundleName,
                 version: sel.version,
-                localDir: path.join(projectRoot, 'build_upload_assets', sel.platform, 'remote', sel.bundleName, sel.version),
+                localDir,
             };
             console.log(`[R2] 上传 ${sel.platform}/${sel.bundleName}/${sel.version}...`);
             const result = await (0, r2_1.uploadBundle)({
@@ -747,14 +754,20 @@ exports.methods = {
                         else {
                             failCount++;
                             console.log(`[R2] ❌ ${sel.platform}/${sel.bundleName}/${sel.version} 重试仍失败`);
-                            const keyPrefix = `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
+                            const isApp = sel.bundleName === '📦 app';
+                            const keyPrefix = isApp
+                                ? `${sel.platform}/app/${sel.version}`
+                                : `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
                             await (0, r2_1.deleteVersionDir)(client, config.bucketName, keyPrefix);
                             console.log(`[R2] 已清理远端不完整版本`);
                         }
                     }
                     else {
                         failCount++;
-                        const keyPrefix = `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
+                        const isApp = sel.bundleName === '📦 app';
+                        const keyPrefix = isApp
+                            ? `${sel.platform}/app/${sel.version}`
+                            : `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
                         await (0, r2_1.deleteVersionDir)(client, config.bucketName, keyPrefix);
                         console.log(`[R2] 已清理远端不完整版本`);
                         uploadCancelled = true;
@@ -847,17 +860,376 @@ exports.methods = {
             console.log('[R2] 用户跳过构建后上传');
             return;
         }
-        // 构造树形数据并打开上传面板
-        const selections = buildInfo.bundleNames.map(bundleName => ({
-            platform: buildInfo.platformName,
-            bundleName,
-            version: buildInfo.version,
+        // 使用 scanBuildUploadAssets 获取完整列表（含 app 产物）
+        const entries = (0, r2_1.scanBuildUploadAssets)(projectRoot);
+        const treeData = entries.map(e => ({
+            platform: e.platform,
+            bundleName: e.bundleName,
+            version: e.version,
         }));
         await Editor.Panel.open('framework-plugin.upload');
-        // 延迟发送数据到面板
         setTimeout(() => {
-            Editor.Message.send('framework-plugin', 'set-tree-data', JSON.stringify(selections));
+            Editor.Message.send('framework-plugin', 'set-tree-data', JSON.stringify(treeData));
         }, 300);
+    },
+    // ==================== Pages 功能 ====================
+    /**
+     * 配置 Pages（打开配置面板）
+     */
+    async configPages() {
+        await Editor.Panel.open('framework-plugin.pages-config');
+        const projectRoot = getProjectPath();
+        const existing = (0, pages_1.loadPagesConfig)(projectRoot);
+        if (existing) {
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'load-pages-config', JSON.stringify(existing));
+            }, 300);
+        }
+    },
+    /**
+     * 保存 Pages 配置
+     */
+    async savePagesConfigFromPanel(configStr) {
+        const projectRoot = getProjectPath();
+        try {
+            const config = JSON.parse(configStr);
+            (0, pages_1.savePagesConfig)(projectRoot, config);
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                text: '✅ 配置已保存',
+                color: '#4ec9b0',
+            }));
+            console.log('[Pages] 配置已保存到 .pagesconfig.json');
+        }
+        catch (_a) {
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                text: '❌ 保存失败',
+                color: '#f44747',
+            }));
+        }
+    },
+    /**
+     * 测试 Pages 连接
+     */
+    async testPagesConnectionFromPanel(configStr) {
+        var _a, _b;
+        try {
+            const config = JSON.parse(configStr);
+            if (!config.pagesApiToken) {
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                    text: '❌ 请先填写 API Token',
+                    color: '#f44747',
+                }));
+                return;
+            }
+            // 找第一个配置了的项目测试
+            const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+            const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
+            if (!accountId) {
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                    text: '❌ 请先在 R2 配置中填写 Account ID',
+                    color: '#f44747',
+                }));
+                return;
+            }
+            let projectName = '';
+            for (const env of ['production', 'staging', 'dev']) {
+                if ((_b = (_a = config.pagesProjects) === null || _a === void 0 ? void 0 : _a[env]) === null || _b === void 0 ? void 0 : _b.projectName) {
+                    projectName = config.pagesProjects[env].projectName;
+                    break;
+                }
+            }
+            if (!projectName) {
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                    text: '❌ 请至少配置一个环境的项目名',
+                    color: '#f44747',
+                }));
+                return;
+            }
+            const result = await (0, pages_1.testPagesConnection)(config.pagesApiToken, accountId, projectName);
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                text: result.success ? `✅ 连接成功 (${projectName})` : `❌ 连接失败: ${result.error}`,
+                color: result.success ? '#4ec9b0' : '#f44747',
+            }));
+        }
+        catch (e) {
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+                text: `❌ ${e.message}`,
+                color: '#f44747',
+            }));
+        }
+    },
+    /**
+     * 前置检查：Token 是否配置
+     */
+    _checkPagesConfig() {
+        const projectRoot = getProjectPath();
+        const config = (0, pages_1.loadPagesConfig)(projectRoot);
+        if (!(0, pages_1.isPagesConfigured)(config)) {
+            Editor.Dialog.warn('Pages 未配置\n\n请先配置 Cloudflare Pages API Token。', {
+                buttons: ['去配置', '取消'], default: 0, cancel: 1,
+            }).then((result) => {
+                if (result.response === 0) {
+                    Editor.Message.send('framework-plugin', 'config-pages');
+                }
+            });
+            return null;
+        }
+        return config;
+    },
+    /**
+     * 部署到 Pages
+     */
+    async deployToPages() {
+        const config = this._checkPagesConfig();
+        if (!config)
+            return;
+        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(r2config)) {
+            Editor.Dialog.warn('R2 未配置\n\n请先配置 R2 以获取版本列表。', {
+                buttons: ['去配置', '取消'], default: 0, cancel: 1,
+            }).then((result) => {
+                if (result.response === 0) {
+                    Editor.Message.send('framework-plugin', 'config-r2');
+                }
+            });
+            return;
+        }
+        // 获取 R2 版本列表
+        const client = (0, r2_1.createS3Client)(r2config);
+        let versions;
+        try {
+            versions = await (0, pages_1.listR2AppVersions)(client, r2config.bucketName);
+        }
+        catch (e) {
+            Editor.Dialog.error(`获取版本列表失败\n\n${e.message}`);
+            return;
+        }
+        if (versions.length === 0) {
+            Editor.Dialog.warn('未找到 App Shell 版本\n\n请先构建并上传到 R2。');
+            return;
+        }
+        const environments = (0, pages_1.getAvailableEnvironments)(config);
+        await Editor.Panel.open('framework-plugin.pages-deploy');
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'set-deploy-data', JSON.stringify({
+                versions,
+                environments,
+            }));
+        }, 300);
+    },
+    /**
+     * 执行部署到 Pages
+     */
+    async doDeployToPages(dataStr) {
+        let data;
+        try {
+            data = JSON.parse(dataStr);
+        }
+        catch (_a) {
+            return;
+        }
+        const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!config || !r2config)
+            return;
+        const client = (0, r2_1.createS3Client)(r2config);
+        const result = await (0, pages_1.deployFromR2)({
+            r2Client: client,
+            r2Bucket: r2config.bucketName,
+            version: data.version,
+            env: data.env,
+            commitMessage: data.commitMessage,
+            config,
+            onLog: (msg, type) => {
+                console.log(msg);
+                Editor.Message.send('framework-plugin', 'append-deploy-log', msg);
+            },
+        });
+        Editor.Message.send('framework-plugin', 'set-deploy-complete', JSON.stringify(result));
+    },
+    // --- 切换版本相关 ---
+    /**
+     * 切换版本（打开面板）
+     */
+    async switchPagesVersion() {
+        const config = this._checkPagesConfig();
+        if (!config)
+            return;
+        const environments = (0, pages_1.getAvailableEnvironments)(config);
+        const firstConfigured = environments.find(e => e.configured);
+        if (!firstConfigured) {
+            Editor.Dialog.warn('请先配置至少一个 Pages 环境的项目名。');
+            return;
+        }
+        _currentSwitchEnv = firstConfigured.env;
+        await Editor.Panel.open('framework-plugin.pages-versions');
+        await this._loadSwitchVersionData(config, firstConfigured.env);
+    },
+    async _loadSwitchVersionData(config, env) {
+        var _a;
+        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+        const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
+        const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+        if (!projectName || !accountId)
+            return;
+        try {
+            const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
+            const environments = (0, pages_1.getAvailableEnvironments)(config);
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'set-versions-data', JSON.stringify({
+                    environments,
+                    deployments,
+                    currentEnv: env,
+                }));
+            }, 300);
+        }
+        catch (e) {
+            console.error('[Pages] 获取部署列表失败', e);
+        }
+    },
+    /**
+     * 切换环境标签（版本面板）
+     */
+    async switchPagesEnv(env) {
+        const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+        if (!config)
+            return;
+        _currentSwitchEnv = env;
+        await this._loadSwitchVersionData(config, env);
+    },
+    /**
+     * 执行版本回滚
+     */
+    async doSwitchPagesVersion(dataStr) {
+        var _a;
+        try {
+            const { deploymentId } = JSON.parse(dataStr);
+            const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+            const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+            if (!config || !r2config)
+                return;
+            const env = _currentSwitchEnv;
+            const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+            const accountId = r2config.accountId;
+            await (0, pages_1.rollbackDeployment)(config.pagesApiToken, accountId, projectName, deploymentId);
+            Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
+                text: '✅ 已切换版本',
+                color: '#4ec9b0',
+            }));
+            // 刷新列表
+            await this._loadSwitchVersionData(config, env);
+        }
+        catch (e) {
+            Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
+                text: `❌ 切换失败: ${e.message}`,
+                color: '#f44747',
+            }));
+        }
+    },
+    // --- 清理版本相关 ---
+    /**
+     * 清理版本（打开面板）
+     */
+    async cleanupPagesVersions() {
+        const config = this._checkPagesConfig();
+        if (!config)
+            return;
+        const environments = (0, pages_1.getAvailableEnvironments)(config);
+        const firstConfigured = environments.find(e => e.configured);
+        if (!firstConfigured) {
+            Editor.Dialog.warn('请先配置至少一个 Pages 环境的项目名。');
+            return;
+        }
+        _currentCleanupEnv = firstConfigured.env;
+        await Editor.Panel.open('framework-plugin.pages-cleanup');
+        await this._loadCleanupData(config, firstConfigured.env);
+    },
+    async _loadCleanupData(config, env) {
+        var _a;
+        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+        const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
+        const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+        if (!projectName || !accountId)
+            return;
+        try {
+            const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
+            // 应用锁定规则
+            const successDeployments = deployments.filter(d => { var _a; return ((_a = d.latest_stage) === null || _a === void 0 ? void 0 : _a.status) === 'success'; });
+            const recentSuccessIds = new Set(successDeployments.slice(0, 3).map(d => d.id));
+            const withLock = deployments.map(d => {
+                let locked = false;
+                let lockReason = '';
+                if (d.is_current) {
+                    locked = true;
+                    lockReason = '当前生产';
+                }
+                else if (recentSuccessIds.has(d.id)) {
+                    locked = true;
+                    lockReason = '最近版本';
+                }
+                return Object.assign(Object.assign({}, d), { locked, lockReason });
+            });
+            const environments = (0, pages_1.getAvailableEnvironments)(config);
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'set-cleanup-data', JSON.stringify({
+                    environments,
+                    deployments: withLock,
+                    currentEnv: env,
+                }));
+            }, 300);
+        }
+        catch (e) {
+            console.error('[Pages] 获取部署列表失败', e);
+        }
+    },
+    /**
+     * 切换环境标签（清理面板）
+     */
+    async cleanupPagesEnv(env) {
+        const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+        if (!config)
+            return;
+        _currentCleanupEnv = env;
+        await this._loadCleanupData(config, env);
+    },
+    /**
+     * 执行清理
+     */
+    async doCleanupPagesVersions(dataStr) {
+        var _a;
+        try {
+            const { ids } = JSON.parse(dataStr);
+            const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+            const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+            if (!config || !r2config)
+                return;
+            const env = _currentCleanupEnv;
+            const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+            const accountId = r2config.accountId;
+            let success = 0;
+            let failed = 0;
+            for (let i = 0; i < ids.length; i++) {
+                Editor.Message.send('framework-plugin', 'set-cleanup-progress', JSON.stringify({
+                    current: i + 1,
+                    total: ids.length,
+                    status: `删除中...`,
+                }));
+                try {
+                    await (0, pages_1.deleteDeployment)(config.pagesApiToken, accountId, projectName, ids[i]);
+                    success++;
+                }
+                catch (e) {
+                    console.error(`[Pages] 删除部署 ${ids[i]} 失败:`, e.message);
+                    failed++;
+                }
+            }
+            Editor.Message.send('framework-plugin', 'set-cleanup-complete', JSON.stringify({ success, failed }));
+            // 刷新列表
+            await this._loadCleanupData(config, env);
+        }
+        catch (e) {
+            console.error('[Pages] 清理失败', e);
+        }
     },
 };
 const load = function () {

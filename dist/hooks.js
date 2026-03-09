@@ -171,7 +171,7 @@ function copyDirRecursive(src, dest) {
  * - android：仅复制 buildDest/data/remote 中的内容
  * - 其他平台：输出提示暂未完成
  */
-function copyToBuildUploadAssets(buildDest, projectRoot) {
+function copyToBuildUploadAssets(buildDest, projectRoot, version) {
     const platformName = path.basename(buildDest);
     const uploadRoot = path.join(projectRoot, 'build_upload_assets');
     const targetDir = path.join(uploadRoot, platformName);
@@ -181,9 +181,17 @@ function copyToBuildUploadAssets(buildDest, projectRoot) {
         fs.rmSync(targetDir, { recursive: true, force: true });
     }
     if (platformName === 'web-mobile' || platformName === 'web-desktop') {
-        // Web 平台：直接复制整个构建目录
-        copyDirRecursive(buildDest, targetDir);
-        console.log(`[BuildUpload] ✅ 已复制 ${platformName} 构建产物到 ${targetDir}`);
+        // Web 平台：仅复制 remote/ 目录（App 产物由 copyAppArtifact 单独处理）
+        const remoteDir = path.join(buildDest, 'remote');
+        if (fs.existsSync(remoteDir)) {
+            const remoteDest = path.join(targetDir, 'remote');
+            fs.mkdirSync(targetDir, { recursive: true });
+            copyDirRecursive(remoteDir, remoteDest);
+            console.log(`[BuildUpload] ✅ 已复制 ${platformName}/remote 到 ${remoteDest}`);
+        }
+        else {
+            console.warn(`[BuildUpload] ⚠️ 未找到 ${remoteDir}，跳过 remote 产物复制`);
+        }
     }
     else if (platformName === 'android' || platformName === 'ios') {
         // Android：将 data/remote 目录复制到 build_upload_assets/android/remote
@@ -200,6 +208,55 @@ function copyToBuildUploadAssets(buildDest, projectRoot) {
     }
     else {
         console.warn(`[BuildUpload] ⚠️ 暂未完成 ${platformName} 平台的 build_upload_assets 整理`);
+    }
+    // ====== App 产物收集 ======
+    copyAppArtifact(buildDest, projectRoot, platformName, version);
+}
+/**
+ * 收集 App 主体产物到 build_upload_assets/{platform}/app/{version}/
+ */
+function copyAppArtifact(buildDest, projectRoot, platformName, version) {
+    const uploadRoot = path.join(projectRoot, 'build_upload_assets');
+    const appVersionDir = path.join(uploadRoot, platformName, 'app', version);
+    if (platformName === 'android') {
+        // Android: 复制 APK
+        const releaseDir = path.join(buildDest, 'publish', 'release');
+        if (!fs.existsSync(releaseDir)) {
+            console.warn(`[BuildUpload] ⚠️ 未找到 ${releaseDir}，跳过 Android APK 收集`);
+            return;
+        }
+        const apkFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.apk'));
+        if (apkFiles.length === 0) {
+            console.warn(`[BuildUpload] ⚠️ ${releaseDir} 中未找到 APK 文件`);
+            return;
+        }
+        fs.mkdirSync(appVersionDir, { recursive: true });
+        const srcApk = path.join(releaseDir, apkFiles[0]);
+        const destApk = path.join(appVersionDir, 'app.apk');
+        fs.copyFileSync(srcApk, destApk);
+        // 写入 manifest
+        fs.writeFileSync(path.join(appVersionDir, 'manifest.json'), JSON.stringify({ version }, null, 2), 'utf-8');
+        console.log(`[BuildUpload] ✅ 已复制 APK → ${destApk}`);
+    }
+    else if (platformName === 'web-mobile' || platformName === 'web-desktop') {
+        // Web: 复制整个构建目录，删除 remote/
+        fs.mkdirSync(appVersionDir, { recursive: true });
+        copyDirRecursive(buildDest, appVersionDir);
+        // 删除 remote 目录（bundle 已在 remote/ 单独管理）
+        const remoteInApp = path.join(appVersionDir, 'remote');
+        if (fs.existsSync(remoteInApp)) {
+            fs.rmSync(remoteInApp, { recursive: true, force: true });
+            console.log(`[BuildUpload] 已删除 app 产物中的 remote/ 目录`);
+        }
+        // 写入 manifest
+        fs.writeFileSync(path.join(appVersionDir, 'manifest.json'), JSON.stringify({ version }, null, 2), 'utf-8');
+        console.log(`[BuildUpload] ✅ 已复制 ${platformName} App 产物 → ${appVersionDir}`);
+    }
+    else if (platformName === 'ios') {
+        console.warn(`[BuildUpload] ⚠️ iOS App 产物收集功能暂未实现（需要 Xcode 归档）`);
+    }
+    else {
+        console.warn(`[BuildUpload] ⚠️ ${platformName} 平台 App 产物收集暂未实现`);
     }
 }
 async function onAfterBuild(options, result) {
@@ -307,7 +364,7 @@ async function onAfterBuild(options, result) {
         }
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
         // 整理构建产物到 build_upload_assets
-        copyToBuildUploadAssets(buildDest, projectRoot);
+        copyToBuildUploadAssets(buildDest, projectRoot, version);
         // 构建后自动询问上传 R2
         try {
             const r2Config = (0, r2_1.loadR2Config)(projectRoot);

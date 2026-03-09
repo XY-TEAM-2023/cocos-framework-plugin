@@ -76,6 +76,6 @@ export declare function deleteVersionDir(client: S3Client, bucket: string, prefi
  *
  * 目录结构：
  *   build_upload_assets/{platform}/remote/{bundleName}/{version}/...
- *   build_upload_assets/{platform}/remote/{bundleName}/version  ← 过滤
+ *   build_upload_assets/{platform}/app/{version}/...              ← 新增：App 产物
  */
 export declare function scanBuildUploadAssets(projectRoot: string): BundleVersionEntry[];

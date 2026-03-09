@@ -53,6 +53,62 @@
       "flags": {
         "alwaysOnTop": true
       }
+    },
+    "pages-config": {
+      "title": "配置 Pages",
+      "type": "simple",
+      "main": "dist/panels/pages-config",
+      "size": {
+        "min-width": 400,
+        "min-height": 400,
+        "width": 480,
+        "height": 520
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "pages-deploy": {
+      "title": "部署到 Pages",
+      "type": "simple",
+      "main": "dist/panels/pages-deploy",
+      "size": {
+        "min-width": 450,
+        "min-height": 400,
+        "width": 550,
+        "height": 500
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "pages-versions": {
+      "title": "切换版本",
+      "type": "simple",
+      "main": "dist/panels/pages-versions",
+      "size": {
+        "min-width": 450,
+        "min-height": 350,
+        "width": 600,
+        "height": 500
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "pages-cleanup": {
+      "title": "清理版本",
+      "type": "simple",
+      "main": "dist/panels/pages-cleanup",
+      "size": {
+        "min-width": 450,
+        "min-height": 350,
+        "width": 600,
+        "height": 500
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
     }
   },
   "contributions": {
@@ -112,6 +168,26 @@
         "path": "框架",
         "label": "关于",
         "message": "show-about"
+      },
+      {
+        "path": "框架/Pages",
+        "label": "配置 Pages",
+        "message": "config-pages"
+      },
+      {
+        "path": "框架/Pages",
+        "label": "部署到 Pages",
+        "message": "deploy-to-pages"
+      },
+      {
+        "path": "框架/Pages",
+        "label": "切换版本",
+        "message": "switch-pages-version"
+      },
+      {
+        "path": "框架/Pages",
+        "label": "清理版本",
+        "message": "cleanup-pages-versions"
       }
     ],
     "messages": {
@@ -273,6 +349,111 @@
       "set-upload-error": {
         "methods": [
           "upload.setError"
+        ]
+      },
+      "config-pages": {
+        "methods": [
+          "configPages"
+        ]
+      },
+      "save-pages-config": {
+        "methods": [
+          "savePagesConfigFromPanel"
+        ]
+      },
+      "test-pages-connection": {
+        "methods": [
+          "testPagesConnectionFromPanel"
+        ]
+      },
+      "load-pages-config": {
+        "methods": [
+          "pages-config.loadConfig"
+        ]
+      },
+      "set-pages-config-status": {
+        "methods": [
+          "pages-config.setStatus"
+        ]
+      },
+      "deploy-to-pages": {
+        "methods": [
+          "deployToPages"
+        ]
+      },
+      "do-deploy-to-pages": {
+        "methods": [
+          "doDeployToPages"
+        ]
+      },
+      "set-deploy-data": {
+        "methods": [
+          "pages-deploy.setDeployData"
+        ]
+      },
+      "append-deploy-log": {
+        "methods": [
+          "pages-deploy.appendDeployLog"
+        ]
+      },
+      "set-deploy-complete": {
+        "methods": [
+          "pages-deploy.setDeployComplete"
+        ]
+      },
+      "switch-pages-version": {
+        "methods": [
+          "switchPagesVersion"
+        ]
+      },
+      "do-switch-pages-version": {
+        "methods": [
+          "doSwitchPagesVersion"
+        ]
+      },
+      "switch-pages-env": {
+        "methods": [
+          "switchPagesEnv"
+        ]
+      },
+      "set-versions-data": {
+        "methods": [
+          "pages-versions.setVersionsData"
+        ]
+      },
+      "set-versions-status": {
+        "methods": [
+          "pages-versions.setStatus"
+        ]
+      },
+      "cleanup-pages-versions": {
+        "methods": [
+          "cleanupPagesVersions"
+        ]
+      },
+      "do-cleanup-pages-versions": {
+        "methods": [
+          "doCleanupPagesVersions"
+        ]
+      },
+      "cleanup-pages-env": {
+        "methods": [
+          "cleanupPagesEnv"
+        ]
+      },
+      "set-cleanup-data": {
+        "methods": [
+          "pages-cleanup.setCleanupData"
+        ]
+      },
+      "set-cleanup-progress": {
+        "methods": [
+          "pages-cleanup.setCleanupProgress"
+        ]
+      },
+      "set-cleanup-complete": {
+        "methods": [
+          "pages-cleanup.setCleanupComplete"
         ]
       }
     }
