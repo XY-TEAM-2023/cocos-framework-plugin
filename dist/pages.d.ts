@@ -48,6 +48,7 @@ export interface DeployOptions {
     env: PagesEnvironment;
     commitMessage: string;
     config: PagesConfig;
+    accountId: string;
     onLog: (msg: string, type?: 'info' | 'success' | 'warn' | 'error') => void;
 }
 export declare function loadPagesConfig(projectRoot: string): PagesConfig | null;

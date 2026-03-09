@@ -146,9 +146,15 @@ async function listR2AppFiles(client, bucket, platform, version) {
     return keys;
 }
 // ==================== 部署 ====================
-function runCmd(cmd, cwd) {
+function runCmd(cmd, options) {
     return new Promise((resolve, reject) => {
-        (0, child_process_1.exec)(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        const mergedEnv = Object.assign(Object.assign(Object.assign({}, process.env), { HOME: process.env.HOME || os.homedir(), PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' }), options === null || options === void 0 ? void 0 : options.env);
+        (0, child_process_1.exec)(cmd, {
+            cwd: options === null || options === void 0 ? void 0 : options.cwd,
+            maxBuffer: 10 * 1024 * 1024,
+            env: mergedEnv,
+            shell: '/bin/zsh',
+        }, (error, stdout, stderr) => {
             if (error) {
                 reject(new Error(stderr || error.message));
             }
@@ -161,10 +167,11 @@ function runCmd(cmd, cwd) {
 /** 从 R2 下载指定版本并部署到 Pages */
 async function deployFromR2(options) {
     var _a, e_1, _b, _c;
-    const { r2Client, r2Bucket, version, env, commitMessage, config, onLog } = options;
+    const { r2Client, r2Bucket, version, env, commitMessage, config, accountId, onLog } = options;
     const projectName = config.pagesProjects[env].projectName;
     const platform = 'web-mobile';
     const prefix = `${platform}/app/${version}/`;
+    const tmpDir = path.join(os.tmpdir(), `pages-deploy-${version}-${Date.now()}`);
     try {
         // 1. 列出文件
         onLog(`[Pages] 正在扫描 R2: ${prefix} ...`);
@@ -174,7 +181,6 @@ async function deployFromR2(options) {
         }
         onLog(`[Pages] 发现 ${keys.length} 个文件`);
         // 2. 下载到临时目录
-        const tmpDir = path.join(os.tmpdir(), `pages-deploy-${version}-${Date.now()}`);
         for (let i = 0; i < keys.length; i++) {
             const key = keys[i];
             const relativePath = key.replace(prefix, '');
@@ -207,26 +213,41 @@ async function deployFromR2(options) {
                 fs.writeFileSync(localPath, Buffer.concat(chunks));
             }
         }
-        onLog(`[Pages] ✅ 全部下载完成`, 'success');
+        onLog(`[Pages] 全部下载完成`, 'success');
         // 3. 部署到 Pages
         onLog(`[Pages] 正在部署到 Pages (项目: ${projectName}) ...`);
-        // 转义 commit message 中的特殊字符
-        const escapedMsg = commitMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n');
-        const cmd = `npx wrangler pages deploy "${tmpDir}"`
+        // wrangler 需要 .wrangler/cache 目录
+        fs.mkdirSync(path.join(tmpDir, '.wrangler', 'cache'), { recursive: true });
+        // 在 commit message 前添加 R2 版本号前缀
+        const fullMsg = `【R2-${version}】${commitMessage}`;
+        const escapedMsg = fullMsg.replace(/"/g, '\\"');
+        const cmd = `npx wrangler pages deploy .`
             + ` --project-name="${projectName}"`
-            + ` --branch="production"`
+            + ` --branch="main"`
             + ` --commit-message="${escapedMsg}"`;
-        const output = await runCmd(cmd);
-        onLog(`[Pages] wrangler 输出:\n${output}`);
+        const output = await runCmd(cmd, {
+            cwd: tmpDir,
+            env: {
+                CLOUDFLARE_API_TOKEN: config.pagesApiToken,
+                CLOUDFLARE_ACCOUNT_ID: accountId,
+            },
+        });
+        onLog(`[Pages] wrangler 输出: ${output}`);
         // 4. 清理
         fs.rmSync(tmpDir, { recursive: true, force: true });
-        onLog(`[Pages] ✅ 部署成功，临时文件已清理`, 'success');
+        onLog(`[Pages] 部署成功，临时文件已清理`, 'success');
         // 提取 URL
         const urlMatch = output.match(/https:\/\/[^\s]+\.pages\.dev/);
         return { success: true, url: urlMatch ? urlMatch[0] : undefined };
     }
     catch (e) {
-        onLog(`[Pages] ❌ 部署失败: ${e.message}`, 'error');
+        onLog(`[Pages] 部署失败: ${e.message}`, 'error');
+        // 清理临时目录
+        try {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+        catch (_g) { }
+        onLog(`[Pages] 临时文件已清理`);
         return { success: false, error: e.message };
     }
 }
@@ -236,7 +257,6 @@ const API_BASE = 'https://api.cloudflare.com/client/v4';
 async function pagesApiFetch(apiToken, accountId, projectName, endpoint = '', method = 'GET') {
     var _a;
     const url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments${endpoint}`;
-    // Use Node.js built-in fetch or fallback to https
     const resp = await fetch(url, {
         method,
         headers: {

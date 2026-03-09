@@ -138,6 +138,82 @@ function setTitle(title) {
 let uploadCancelled = false;
 let _currentSwitchEnv = 'production';
 let _currentCleanupEnv = 'production';
+// ==================== Pages 辅助函数 ====================
+function _checkPagesConfig() {
+    const projectRoot = getProjectPath();
+    const config = (0, pages_1.loadPagesConfig)(projectRoot);
+    if (!(0, pages_1.isPagesConfigured)(config)) {
+        Editor.Dialog.warn('Pages 未配置\n\n请先配置 Cloudflare Pages API Token。', {
+            buttons: ['去配置', '取消'], default: 0, cancel: 1,
+        }).then((result) => {
+            if (result.response === 0) {
+                Editor.Message.send('framework-plugin', 'config-pages');
+            }
+        });
+        return null;
+    }
+    return config;
+}
+async function _loadSwitchVersionData(config, env) {
+    var _a;
+    const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+    const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
+    const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+    if (!projectName || !accountId)
+        return;
+    try {
+        const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
+        const environments = (0, pages_1.getAvailableEnvironments)(config);
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'set-versions-data', JSON.stringify({
+                environments,
+                deployments,
+                currentEnv: env,
+            }));
+        }, 300);
+    }
+    catch (e) {
+        console.error('[Pages] 获取部署列表失败', e);
+    }
+}
+async function _loadCleanupData(config, env) {
+    var _a;
+    const r2config = (0, r2_1.loadR2Config)(getProjectPath());
+    const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
+    const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
+    if (!projectName || !accountId)
+        return;
+    try {
+        const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
+        // 应用锁定规则
+        const successDeployments = deployments.filter(d => { var _a; return ((_a = d.latest_stage) === null || _a === void 0 ? void 0 : _a.status) === 'success'; });
+        const recentSuccessIds = new Set(successDeployments.slice(0, 3).map(d => d.id));
+        const withLock = deployments.map(d => {
+            let locked = false;
+            let lockReason = '';
+            if (d.is_current) {
+                locked = true;
+                lockReason = '当前生产';
+            }
+            else if (recentSuccessIds.has(d.id)) {
+                locked = true;
+                lockReason = '最近版本';
+            }
+            return Object.assign(Object.assign({}, d), { locked, lockReason });
+        });
+        const environments = (0, pages_1.getAvailableEnvironments)(config);
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'set-cleanup-data', JSON.stringify({
+                environments,
+                deployments: withLock,
+                currentEnv: env,
+            }));
+        }, 300);
+    }
+    catch (e) {
+        console.error('[Pages] 获取部署列表失败', e);
+    }
+}
 // ==================== 插件入口 ====================
 exports.methods = {
     openLogPanel() {
@@ -959,28 +1035,10 @@ exports.methods = {
         }
     },
     /**
-     * 前置检查：Token 是否配置
-     */
-    _checkPagesConfig() {
-        const projectRoot = getProjectPath();
-        const config = (0, pages_1.loadPagesConfig)(projectRoot);
-        if (!(0, pages_1.isPagesConfigured)(config)) {
-            Editor.Dialog.warn('Pages 未配置\n\n请先配置 Cloudflare Pages API Token。', {
-                buttons: ['去配置', '取消'], default: 0, cancel: 1,
-            }).then((result) => {
-                if (result.response === 0) {
-                    Editor.Message.send('framework-plugin', 'config-pages');
-                }
-            });
-            return null;
-        }
-        return config;
-    },
-    /**
      * 部署到 Pages
      */
     async deployToPages() {
-        const config = this._checkPagesConfig();
+        const config = _checkPagesConfig();
         if (!config)
             return;
         const r2config = (0, r2_1.loadR2Config)(getProjectPath());
@@ -1040,6 +1098,7 @@ exports.methods = {
             env: data.env,
             commitMessage: data.commitMessage,
             config,
+            accountId: r2config.accountId,
             onLog: (msg, type) => {
                 console.log(msg);
                 Editor.Message.send('framework-plugin', 'append-deploy-log', msg);
@@ -1063,29 +1122,7 @@ exports.methods = {
         }
         _currentSwitchEnv = firstConfigured.env;
         await Editor.Panel.open('framework-plugin.pages-versions');
-        await this._loadSwitchVersionData(config, firstConfigured.env);
-    },
-    async _loadSwitchVersionData(config, env) {
-        var _a;
-        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
-        const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
-        const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
-        if (!projectName || !accountId)
-            return;
-        try {
-            const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
-            const environments = (0, pages_1.getAvailableEnvironments)(config);
-            setTimeout(() => {
-                Editor.Message.send('framework-plugin', 'set-versions-data', JSON.stringify({
-                    environments,
-                    deployments,
-                    currentEnv: env,
-                }));
-            }, 300);
-        }
-        catch (e) {
-            console.error('[Pages] 获取部署列表失败', e);
-        }
+        await _loadSwitchVersionData(config, firstConfigured.env);
     },
     /**
      * 切换环境标签（版本面板）
@@ -1095,7 +1132,7 @@ exports.methods = {
         if (!config)
             return;
         _currentSwitchEnv = env;
-        await this._loadSwitchVersionData(config, env);
+        await _loadSwitchVersionData(config, env);
     },
     /**
      * 执行版本回滚
@@ -1117,7 +1154,7 @@ exports.methods = {
                 color: '#4ec9b0',
             }));
             // 刷新列表
-            await this._loadSwitchVersionData(config, env);
+            await _loadSwitchVersionData(config, env);
         }
         catch (e) {
             Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
@@ -1142,45 +1179,7 @@ exports.methods = {
         }
         _currentCleanupEnv = firstConfigured.env;
         await Editor.Panel.open('framework-plugin.pages-cleanup');
-        await this._loadCleanupData(config, firstConfigured.env);
-    },
-    async _loadCleanupData(config, env) {
-        var _a;
-        const r2config = (0, r2_1.loadR2Config)(getProjectPath());
-        const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
-        const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
-        if (!projectName || !accountId)
-            return;
-        try {
-            const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
-            // 应用锁定规则
-            const successDeployments = deployments.filter(d => { var _a; return ((_a = d.latest_stage) === null || _a === void 0 ? void 0 : _a.status) === 'success'; });
-            const recentSuccessIds = new Set(successDeployments.slice(0, 3).map(d => d.id));
-            const withLock = deployments.map(d => {
-                let locked = false;
-                let lockReason = '';
-                if (d.is_current) {
-                    locked = true;
-                    lockReason = '当前生产';
-                }
-                else if (recentSuccessIds.has(d.id)) {
-                    locked = true;
-                    lockReason = '最近版本';
-                }
-                return Object.assign(Object.assign({}, d), { locked, lockReason });
-            });
-            const environments = (0, pages_1.getAvailableEnvironments)(config);
-            setTimeout(() => {
-                Editor.Message.send('framework-plugin', 'set-cleanup-data', JSON.stringify({
-                    environments,
-                    deployments: withLock,
-                    currentEnv: env,
-                }));
-            }, 300);
-        }
-        catch (e) {
-            console.error('[Pages] 获取部署列表失败', e);
-        }
+        await _loadCleanupData(config, firstConfigured.env);
     },
     /**
      * 切换环境标签（清理面板）
@@ -1190,7 +1189,7 @@ exports.methods = {
         if (!config)
             return;
         _currentCleanupEnv = env;
-        await this._loadCleanupData(config, env);
+        await _loadCleanupData(config, env);
     },
     /**
      * 执行清理
@@ -1225,7 +1224,7 @@ exports.methods = {
             }
             Editor.Message.send('framework-plugin', 'set-cleanup-complete', JSON.stringify({ success, failed }));
             // 刷新列表
-            await this._loadCleanupData(config, env);
+            await _loadCleanupData(config, env);
         }
         catch (e) {
             console.error('[Pages] 清理失败', e);

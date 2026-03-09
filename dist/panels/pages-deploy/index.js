@@ -22,7 +22,7 @@ exports.template = `
     <div id="step1" style="flex: 1; overflow-y: auto; padding: 16px;">
         <div style="margin-bottom: 14px;">
             <label style="display: block; margin-bottom: 6px; color: #9cdcfe; font-size: 12px; font-weight: bold;">选择版本（R2）</label>
-            <div id="version-list" style="max-height: 200px; overflow-y: auto; border: 1px solid #404040; border-radius: 4px; background: #2d2d2d;"></div>
+            <div id="version-list" style="max-height: 200px; overflow-y: auto; border-radius: 4px;"></div>
         </div>
         <div style="margin-bottom: 14px;">
             <label style="display: block; margin-bottom: 6px; color: #9cdcfe; font-size: 12px; font-weight: bold;">部署目标</label>
@@ -44,8 +44,8 @@ exports.template = `
     <!-- Deploying status -->
     <div id="deploying" style="flex: 1; overflow-y: auto; padding: 16px; display: none;">
         <div style="text-align: center; padding: 40px 0;">
-            <div style="font-size: 24px; margin-bottom: 12px;">⏳</div>
-            <div style="color: #569cd6; font-size: 14px;">正在部署...</div>
+            <div id="deploy-icon" style="font-size: 24px; margin-bottom: 12px;">⏳</div>
+            <div id="deploy-msg" style="color: #569cd6; font-size: 14px;">正在部署...</div>
             <div id="deploy-log" style="margin-top: 16px; text-align: left; font-size: 11px; color: #888; max-height: 200px; overflow-y: auto;"></div>
         </div>
     </div>
@@ -64,19 +64,23 @@ exports.style = `
 #pages-deploy-panel button:hover:not(:disabled) {
     opacity: 0.9;
 }
-.version-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #333; }
-.version-item:hover { background: #383838; }
-.version-item.selected { background: #0e639c33; border-left: 3px solid #0e639c; }
-.env-item { padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-.env-item:hover:not(.disabled) { background: #383838; }
-.env-item.selected { background: #0e639c33; }
+.sel-item { padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; border-radius: 4px; margin-bottom: 2px; border: 1px solid transparent; }
+.sel-item:hover { background: #2a2d2e; }
+.sel-item.selected { border-color: #0e639c; background: #0e639c1a; }
+.sel-item .sel-icon { font-size: 13px; width: 20px; text-align: center; }
+.env-item { padding: 8px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; border: 1px solid transparent; }
+.env-item:hover:not(.disabled) { background: #2a2d2e; }
+.env-item.selected { border-color: #0e639c; background: #0e639c1a; }
 .env-item.disabled { opacity: 0.4; cursor: not-allowed; }
+.env-item .sel-icon { font-size: 13px; width: 20px; text-align: center; }
 `;
 exports.$ = {
     'header-title': '#header-title',
     'step1': '#step1',
     'step2': '#step2',
     'deploying': '#deploying',
+    'deploy-icon': '#deploy-icon',
+    'deploy-msg': '#deploy-msg',
     'version-list': '#version-list',
     'env-list': '#env-list',
     'input-commit-msg': '#input-commit-msg',
@@ -93,7 +97,7 @@ let selectedEnvLabel = '';
 let panelRef = null;
 function getSelectedVersion() {
     var _a;
-    const el = (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['version-list']) === null || _a === void 0 ? void 0 : _a.querySelector('.version-item.selected');
+    const el = (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['version-list']) === null || _a === void 0 ? void 0 : _a.querySelector('.sel-item.selected');
     return (el === null || el === void 0 ? void 0 : el.getAttribute('data-version')) || '';
 }
 function getSelectedEnv() {
@@ -188,11 +192,22 @@ exports.methods = {
                     versionList.innerHTML = '<div style="padding: 12px; text-align: center; color: #666;">未找到版本</div>';
                 }
                 else {
-                    versionList.innerHTML = versions.map((v) => `<div class="version-item" data-version="${v}" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #333;">📦 ${v}</div>`).join('');
-                    versionList.querySelectorAll('.version-item').forEach(el => {
+                    versionList.innerHTML = versions.map((v) => {
+                        // 解析 YYMMDDHHMMSS 格式
+                        let dateStr = '';
+                        if (/^\d{12}$/.test(v)) {
+                            dateStr = `${v.slice(0, 2)}/${v.slice(2, 4)}/${v.slice(4, 6)} ${v.slice(6, 8)}:${v.slice(8, 10)}:${v.slice(10, 12)}`;
+                        }
+                        return `<div class="sel-item" data-version="${v}"><span class="sel-icon"></span><span>${v}</span>${dateStr ? `<span style="color:#888;font-size:11px;margin-left:auto;">${dateStr}</span>` : ''}</div>`;
+                    }).join('');
+                    versionList.querySelectorAll('.sel-item').forEach(el => {
                         el.addEventListener('click', () => {
-                            versionList.querySelectorAll('.version-item').forEach(e => e.classList.remove('selected'));
+                            versionList.querySelectorAll('.sel-item').forEach(e => {
+                                e.classList.remove('selected');
+                                e.querySelector('.sel-icon').textContent = '';
+                            });
                             el.classList.add('selected');
+                            el.querySelector('.sel-icon').textContent = '✅';
                         });
                     });
                 }
@@ -202,21 +217,22 @@ exports.methods = {
             if (envList) {
                 envList.innerHTML = envData.map((e) => {
                     const disabled = !e.configured;
-                    return `<div class="env-item${disabled ? ' disabled' : ''}" data-env="${e.env}" style="padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; cursor: ${disabled ? 'not-allowed' : 'pointer'}; display: flex; align-items: center; gap: 8px; ${disabled ? 'opacity: 0.4;' : ''}">
-                        <span style="font-size: 14px;">${disabled ? '×' : '○'}</span>
+                    return `<div class="env-item${disabled ? ' disabled' : ''}" data-env="${e.env}">
+                        <span class="sel-icon">${disabled ? '×' : ''}</span>
                         <span>${e.label}</span>
                         <span style="color: #888; font-size: 11px;">${e.configured ? e.projectName : '待配置'}</span>
                     </div>`;
                 }).join('');
                 envList.querySelectorAll('.env-item:not(.disabled)').forEach(el => {
                     el.addEventListener('click', () => {
-                        envList.querySelectorAll('.env-item').forEach(e => e.classList.remove('selected'));
-                        el.classList.add('selected');
-                        el.querySelector('span').textContent = '●';
-                        // Reset non-selected
-                        envList.querySelectorAll('.env-item:not(.selected):not(.disabled)').forEach(e => {
-                            e.querySelector('span').textContent = '○';
+                        envList.querySelectorAll('.env-item').forEach(e => {
+                            e.classList.remove('selected');
+                            const icon = e.querySelector('.sel-icon');
+                            if (!e.classList.contains('disabled'))
+                                icon.textContent = '';
                         });
+                        el.classList.add('selected');
+                        el.querySelector('.sel-icon').textContent = '✅';
                     });
                 });
             }
@@ -240,16 +256,15 @@ exports.methods = {
     setDeployComplete(resultStr) {
         try {
             const result = JSON.parse(resultStr);
-            const deploying = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['deploying'];
-            if (deploying) {
-                const icon = result.success ? '✅' : '❌';
-                const msg = result.success ? `部署成功！${result.url ? '\n' + result.url : ''}` : `部署失败: ${result.error}`;
-                const color = result.success ? '#4ec9b0' : '#f44747';
-                deploying.querySelector('div > div:first-child').textContent = icon;
-                const textEl = deploying.querySelector('div > div:nth-child(2)');
-                textEl.textContent = msg;
-                textEl.style.color = color;
-                textEl.style.whiteSpace = 'pre-wrap';
+            const iconEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['deploy-icon'];
+            const msgEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['deploy-msg'];
+            if (iconEl && msgEl) {
+                iconEl.textContent = result.success ? '✅' : '❌';
+                msgEl.textContent = result.success
+                    ? `部署成功！${result.url ? '\n' + result.url : ''}`
+                    : `部署失败: ${result.error || '未知错误'}`;
+                msgEl.style.color = result.success ? '#4ec9b0' : '#f44747';
+                msgEl.style.whiteSpace = 'pre-wrap';
             }
         }
         catch (e) {
