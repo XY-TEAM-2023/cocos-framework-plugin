@@ -19,6 +19,14 @@ export const template = `
         <!-- Tabs injected here -->
     </div>
 
+    <!-- Action Bar: Apply Latest -->
+    <div id="action-bar" style="display: none; padding: 8px 16px; background: #252526; border-bottom: 1px solid #3c3c3c; align-items: center; gap: 8px;">
+        <span style="color: #888; font-size: 12px; margin-right: 4px;">一键应用最新版本 →</span>
+        <button class="apply-btn apply-dev" data-env="dev">🚀 DEV</button>
+        <button class="apply-btn apply-beta" data-env="beta">🚀 BETA</button>
+        <button class="apply-btn apply-prod" data-env="prod">🚀 PROD</button>
+    </div>
+
     <!-- Content Area (Table Header) -->
     <div id="tree-container" style="flex: 1; overflow-y: auto; padding: 0;">
         <div id="tree-loading" style="text-align: center; color: #888; padding: 40px;">加载中...</div>
@@ -46,6 +54,14 @@ export const style = `
 .tab-btn:hover { color: #d4d4d4; }
 .tab-btn.active { color: #4ec9b0; border-bottom-color: #4ec9b0; font-weight: bold; }
 
+.apply-btn { border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 12px; font-weight: bold; transition: opacity 0.2s, transform 0.1s; }
+.apply-btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+.apply-btn:active:not(:disabled) { transform: translateY(0); }
+.apply-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.apply-dev { background: #2ea043; color: #fff; }
+.apply-beta { background: #d29922; color: #1e1e1e; }
+.apply-prod { background: #da3633; color: #fff; }
+
 .bv-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .bv-table th { background: #252526; position: sticky; top: 0; z-index: 10; text-align: left; padding: 10px 12px; border-bottom: 1px solid #3c3c3c; color: #888; font-size: 11px; text-transform: uppercase; }
 .bv-table td { padding: 8px 12px; border-bottom: 1px solid #2d2d2d; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -67,6 +83,7 @@ export const style = `
 
 export const $ = {
     'platform-tabs': '#platform-tabs',
+    'action-bar': '#action-bar',
     'tree-container': '#tree-container',
     'version-selector': '#version-selector',
     'vs-title': '#vs-title',
@@ -101,9 +118,25 @@ function formatVersion(v: string): string {
     return '';
 }
 
+function updateActionBar() {
+    const actionBar = panelRef?.$['action-bar'] as HTMLElement;
+    if (!actionBar) return;
+    actionBar.style.display = activePlatform ? 'flex' : 'none';
+}
+
+function setApplyButtonsDisabled(disabled: boolean) {
+    const actionBar = panelRef?.$['action-bar'] as HTMLElement;
+    if (!actionBar) return;
+    actionBar.querySelectorAll('.apply-btn').forEach(btn => {
+        (btn as HTMLButtonElement).disabled = disabled;
+    });
+}
+
 function renderTree() {
     const container = panelRef?.$['tree-container'] as HTMLElement;
     if (!container) return;
+
+    updateActionBar();
 
     if (!activePlatform) {
         container.innerHTML = '<div style="text-align: center; color: #888; padding: 60px;">请在上方选择一个平台管理 Bundle 版本</div>';
@@ -313,6 +346,27 @@ export function ready(this: any) {
         }
     });
 
+    // 一键应用最新版本按钮
+    const actionBar = this.$['action-bar'] as HTMLElement;
+    actionBar.querySelectorAll('.apply-btn').forEach((btn: Element) => {
+        btn.addEventListener('click', async () => {
+            if (!activePlatform) return;
+            const env = (btn as HTMLElement).dataset.env!;
+            const envLabel = env.toUpperCase();
+
+            const result = await Editor.Dialog.info(
+                `确定要将 ${activePlatform} 平台下所有 Bundle 的最新版本应用到 ${envLabel} 环境吗？`,
+                { buttons: ['确定', '取消'], default: 0, cancel: 1 }
+            );
+
+            if (result.response === 0) {
+                console.log(`[Bundle版本管理] 一键应用最新: ${activePlatform} → ${envLabel}`);
+                setApplyButtonsDisabled(true);
+                Editor.Message.send('framework-plugin', 'apply-latest-to-env', activePlatform, env);
+            }
+        });
+    });
+
     // 初始加载平台列表
     console.log('[Bundle版本管理] 发送初始加载平台列表消息');
     Editor.Message.send('framework-plugin', 'load-bundle-platforms');
@@ -421,6 +475,24 @@ export const methods = {
             }
         } else {
             Editor.Dialog.warn(msg || '切换失败', { buttons: ['确定'] });
+        }
+    },
+
+    applyLatestResult(jsonStr: string) {
+        setApplyButtonsDisabled(false);
+        try {
+            const data = JSON.parse(jsonStr) as { success: boolean; message: string };
+            if (data.success) {
+                Editor.Dialog.info(data.message, { buttons: ['确定'] });
+                // 刷新当前平台的树
+                if (activePlatform) {
+                    Editor.Message.send('framework-plugin', 'load-bundle-tree-by-platform', activePlatform);
+                }
+            } else {
+                Editor.Dialog.warn(data.message || '操作失败', { buttons: ['确定'] });
+            }
+        } catch {
+            Editor.Dialog.warn('结果解析失败', { buttons: ['确定'] });
         }
     },
 };

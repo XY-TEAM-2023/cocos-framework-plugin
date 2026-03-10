@@ -6,7 +6,7 @@ import {
     testConnection, scanBuildUploadAssets, uploadBundle, deleteVersionDir,
     checkVersionExists, checkBundleChanged,
     listR2Platforms, listR2Bundles, listR2BundleVersions,
-    listR2AllBundleVersions, getR2BundleVersions, setR2BundleVersion,
+    listR2AllBundleVersions, getR2BundleVersions, setR2BundleVersion, getR2LatestVersions,
     R2Config, BundleVersionEntry, UploadProgress,
 } from './r2';
 import {
@@ -1559,6 +1559,60 @@ export const methods: { [key: string]: (...args: any) => any } = {
         } catch (e: any) {
             console.error('[Bundle版本管理] 切换失败:', e.message);
             Editor.Message.send('framework-plugin', 'switch-bundle-version-result', false, e.message);
+        }
+    },
+
+    /**
+     * 一键将当前平台所有 Bundle 的最新版本应用到指定环境
+     */
+    async applyLatestToEnv(platform: string, env: string) {
+        console.log(`[Bundle版本管理] 一键应用最新版本: ${platform} → ${env}`);
+        const config = loadR2Config(getProjectPath());
+        if (!isR2Configured(config) || !config) {
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: false, message: 'R2 未配置',
+            }));
+            return;
+        }
+
+        try {
+            const client = createS3Client(config);
+            const latestMap = await getR2LatestVersions(client, config.bucketName, platform);
+
+            if (latestMap.size === 0) {
+                Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                    success: false, message: '该平台下没有找到任何 Bundle',
+                }));
+                return;
+            }
+
+            const errors: string[] = [];
+            let successCount = 0;
+
+            for (const [bundleName, latestVersion] of latestMap.entries()) {
+                try {
+                    await setR2BundleVersion(client, config.bucketName, platform, bundleName, env as any, latestVersion);
+                    console.log(`[Bundle版本管理] ✅ ${bundleName} ${env}=${latestVersion}`);
+                    successCount++;
+                } catch (e: any) {
+                    console.error(`[Bundle版本管理] ❌ ${bundleName}: ${e.message}`);
+                    errors.push(`${bundleName}: ${e.message}`);
+                }
+            }
+
+            const message = errors.length === 0
+                ? `成功将 ${successCount} 个 Bundle 的最新版本应用到 ${env.toUpperCase()}`
+                : `完成 ${successCount}/${latestMap.size}，失败 ${errors.length}：\n${errors.join('\n')}`;
+
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: errors.length === 0,
+                message,
+            }));
+        } catch (e: any) {
+            console.error('[Bundle版本管理] 一键应用失败:', e.message);
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: false, message: e.message,
+            }));
         }
     },
 };

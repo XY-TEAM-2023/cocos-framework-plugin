@@ -558,6 +558,16 @@
         "methods": [
           "bundle-versions.switchBundleVersionResult"
         ]
+      },
+      "apply-latest-to-env": {
+        "methods": [
+          "applyLatestToEnv"
+        ]
+      },
+      "apply-latest-result": {
+        "methods": [
+          "bundle-versions.applyLatestResult"
+        ]
       }
     }
   },

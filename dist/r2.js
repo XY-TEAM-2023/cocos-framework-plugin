@@ -32,7 +32,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listR2AllBundleVersions = exports.setR2BundleVersion = exports.getR2BundleVersions = exports.listR2BundleVersions = exports.listR2Bundles = exports.listR2Platforms = exports.scanBuildUploadAssets = exports.deleteVersionDir = exports.uploadBundle = exports.uploadFile = exports.checkBundleChanged = exports.checkVersionExists = exports.testConnection = exports.createS3Client = exports.isR2Configured = exports.saveR2Config = exports.loadR2Config = void 0;
+exports.getR2LatestVersions = exports.listR2AllBundleVersions = exports.setR2BundleVersion = exports.getR2BundleVersions = exports.listR2BundleVersions = exports.listR2Bundles = exports.listR2Platforms = exports.scanBuildUploadAssets = exports.deleteVersionDir = exports.uploadBundle = exports.uploadFile = exports.checkBundleChanged = exports.checkVersionExists = exports.testConnection = exports.createS3Client = exports.isR2Configured = exports.saveR2Config = exports.loadR2Config = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const client_s3_1 = require("@aws-sdk/client-s3");
@@ -718,4 +718,30 @@ async function listR2AllBundleVersions(client, bucket, platform) {
     });
 }
 exports.listR2AllBundleVersions = listR2AllBundleVersions;
+/**
+ * 获取指定平台下每个 Bundle 的最新版本号
+ * 返回 { bundleName: latestVersion } 的映射
+ */
+async function getR2LatestVersions(client, bucket, platform) {
+    const bundles = await listR2Bundles(client, bucket, platform);
+    const result = new Map();
+    // 并发获取每个 Bundle 的版本列表（只取第一页即可，已按降序排列）
+    const CONCURRENCY = 10;
+    for (let i = 0; i < bundles.length; i += CONCURRENCY) {
+        const batch = bundles.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async (bundleName) => {
+            try {
+                const { versions } = await listR2BundleVersions(client, bucket, platform, bundleName, 1);
+                if (versions.length > 0) {
+                    result.set(bundleName, versions[0]); // versions[0] 即最新版本
+                }
+            }
+            catch (e) {
+                console.warn(`[R2] 获取 ${bundleName} 最新版本失败: ${e.message}`);
+            }
+        }));
+    }
+    return result;
+}
+exports.getR2LatestVersions = getR2LatestVersions;
 //# sourceMappingURL=r2.js.map

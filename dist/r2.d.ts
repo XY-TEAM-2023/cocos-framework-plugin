@@ -138,3 +138,8 @@ export declare function listR2AllBundleVersions(client: S3Client, bucket: string
     bundleName: string;
     versions: BundleVersionInfo;
 }>>;
+/**
+ * 获取指定平台下每个 Bundle 的最新版本号
+ * 返回 { bundleName: latestVersion } 的映射
+ */
+export declare function getR2LatestVersions(client: S3Client, bucket: string, platform: string): Promise<Map<string, string>>;

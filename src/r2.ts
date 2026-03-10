@@ -816,3 +816,32 @@ export async function listR2AllBundleVersions(
         return a.bundleName.localeCompare(b.bundleName);
     });
 }
+
+/**
+ * 获取指定平台下每个 Bundle 的最新版本号
+ * 返回 { bundleName: latestVersion } 的映射
+ */
+export async function getR2LatestVersions(
+    client: S3Client, bucket: string, platform: string
+): Promise<Map<string, string>> {
+    const bundles = await listR2Bundles(client, bucket, platform);
+    const result = new Map<string, string>();
+
+    // 并发获取每个 Bundle 的版本列表（只取第一页即可，已按降序排列）
+    const CONCURRENCY = 10;
+    for (let i = 0; i < bundles.length; i += CONCURRENCY) {
+        const batch = bundles.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async (bundleName) => {
+            try {
+                const { versions } = await listR2BundleVersions(client, bucket, platform, bundleName, 1);
+                if (versions.length > 0) {
+                    result.set(bundleName, versions[0]); // versions[0] 即最新版本
+                }
+            } catch (e: any) {
+                console.warn(`[R2] 获取 ${bundleName} 最新版本失败: ${e.message}`);
+            }
+        }));
+    }
+
+    return result;
+}

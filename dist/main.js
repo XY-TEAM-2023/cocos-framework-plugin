@@ -1434,6 +1434,55 @@ exports.methods = {
             Editor.Message.send('framework-plugin', 'switch-bundle-version-result', false, e.message);
         }
     },
+    /**
+     * 一键将当前平台所有 Bundle 的最新版本应用到指定环境
+     */
+    async applyLatestToEnv(platform, env) {
+        console.log(`[Bundle版本管理] 一键应用最新版本: ${platform} → ${env}`);
+        const config = (0, r2_1.loadR2Config)(getProjectPath());
+        if (!(0, r2_1.isR2Configured)(config) || !config) {
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: false, message: 'R2 未配置',
+            }));
+            return;
+        }
+        try {
+            const client = (0, r2_1.createS3Client)(config);
+            const latestMap = await (0, r2_1.getR2LatestVersions)(client, config.bucketName, platform);
+            if (latestMap.size === 0) {
+                Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                    success: false, message: '该平台下没有找到任何 Bundle',
+                }));
+                return;
+            }
+            const errors = [];
+            let successCount = 0;
+            for (const [bundleName, latestVersion] of latestMap.entries()) {
+                try {
+                    await (0, r2_1.setR2BundleVersion)(client, config.bucketName, platform, bundleName, env, latestVersion);
+                    console.log(`[Bundle版本管理] ✅ ${bundleName} ${env}=${latestVersion}`);
+                    successCount++;
+                }
+                catch (e) {
+                    console.error(`[Bundle版本管理] ❌ ${bundleName}: ${e.message}`);
+                    errors.push(`${bundleName}: ${e.message}`);
+                }
+            }
+            const message = errors.length === 0
+                ? `成功将 ${successCount} 个 Bundle 的最新版本应用到 ${env.toUpperCase()}`
+                : `完成 ${successCount}/${latestMap.size}，失败 ${errors.length}：\n${errors.join('\n')}`;
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: errors.length === 0,
+                message,
+            }));
+        }
+        catch (e) {
+            console.error('[Bundle版本管理] 一键应用失败:', e.message);
+            Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
+                success: false, message: e.message,
+            }));
+        }
+    },
 };
 const load = function () {
     console.log('[框架管理] 插件已加载');
