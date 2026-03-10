@@ -54,6 +54,20 @@
         "alwaysOnTop": true
       }
     },
+    "settings": {
+      "title": "插件设置",
+      "type": "simple",
+      "main": "dist/panels/settings",
+      "size": {
+        "min-width": 420,
+        "min-height": 450,
+        "width": 500,
+        "height": 550
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
     "pages-config": {
       "title": "配置 Pages",
       "type": "simple",
@@ -129,58 +143,43 @@
     "builder": "./dist/builder",
     "menu": [
       {
-        "path": "框架/R2",
-        "label": "配置 R2",
-        "message": "config-r2"
-      },
-      {
-        "path": "框架/R2",
-        "label": "上传到 R2",
+        "path": "框架",
+        "label": "上传R2",
         "message": "upload-to-r2"
       },
       {
-        "path": "框架/R2",
-        "label": "✅ 开启构建后自动询问上传",
-        "message": "enable-auto-prompt"
-      },
-      {
-        "path": "框架/R2",
-        "label": "❌ 关闭构建后自动询问上传",
-        "message": "disable-auto-prompt"
-      },
-      {
-        "path": "框架/版本管理",
-        "label": "从R2部署APP",
+        "path": "框架/主包/WEB",
+        "label": "从R2部署Page",
         "message": "deploy-to-pages"
       },
       {
-        "path": "框架/版本管理",
-        "label": "切换APP版本",
+        "path": "框架/主包/WEB",
+        "label": "切换版本",
         "message": "switch-pages-version"
       },
       {
-        "path": "框架/版本管理",
-        "label": "切换Bundle版本",
+        "path": "框架/远程包",
+        "label": "切换版本",
         "message": "manage-bundle-versions"
       },
       {
-        "path": "框架/版本管理/清理",
-        "label": "清理APP版本",
+        "path": "框架/远程包",
+        "label": "清理版本",
         "message": "cleanup-pages-versions"
       },
       {
-        "path": "框架",
-        "label": "插件设置",
-        "message": "config-pages"
+        "path": "框架/框架",
+        "label": "配置",
+        "message": "open-settings"
       },
       {
-        "path": "框架",
-        "label": "更新框架",
+        "path": "框架/框架",
+        "label": "更新",
         "message": "update-framework"
       },
       {
-        "path": "框架",
-        "label": "修复框架",
+        "path": "框架/框架",
+        "label": "修复",
         "message": "repair-framework"
       },
       {
@@ -285,6 +284,11 @@
           "configR2"
         ]
       },
+      "open-settings": {
+        "methods": [
+          "openSettings"
+        ]
+      },
       "save-r2-config": {
         "methods": [
           "saveR2ConfigFromPanel"
@@ -303,6 +307,21 @@
       "set-r2-config-status": {
         "methods": [
           "r2config.setStatus"
+        ]
+      },
+      "load-settings-r2": {
+        "methods": [
+          "loadSettingsR2"
+        ]
+      },
+      "set-settings-r2-status": {
+        "methods": [
+          "settings.setR2Status"
+        ]
+      },
+      "load-settings-r2-config": {
+        "methods": [
+          "settings.loadR2Config"
         ]
       },
       "upload-to-r2": {
@@ -328,6 +347,11 @@
       "disable-auto-prompt": {
         "methods": [
           "disableAutoPrompt"
+        ]
+      },
+      "toggle-auto-prompt": {
+        "methods": [
+          "toggleAutoPrompt"
         ]
       },
       "prompt-upload-after-build": {
@@ -388,6 +412,21 @@
       "set-pages-config-status": {
         "methods": [
           "pages-config.setStatus"
+        ]
+      },
+      "load-settings-pages": {
+        "methods": [
+          "loadSettingsPages"
+        ]
+      },
+      "set-settings-pages-status": {
+        "methods": [
+          "settings.setPagesStatus"
+        ]
+      },
+      "load-settings-pages-config": {
+        "methods": [
+          "settings.loadPagesConfig"
         ]
       },
       "deploy-to-pages": {

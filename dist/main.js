@@ -638,13 +638,42 @@ exports.methods = {
      */
     async configR2() {
         await Editor.Panel.open('framework-plugin.r2config');
-        // 延迟发送现有配置到面板
         const projectRoot = getProjectPath();
         const existing = (0, r2_1.loadR2Config)(projectRoot);
         if (existing) {
             setTimeout(() => {
                 Editor.Message.send('framework-plugin', 'load-r2-config', JSON.stringify(existing));
             }, 300);
+        }
+    },
+    /**
+     * 打开统一设置面板
+     */
+    async openSettings() {
+        await Editor.Panel.open('framework-plugin.settings');
+    },
+    /**
+     * 设置面板请求加载 R2 配置
+     */
+    async loadSettingsR2() {
+        const projectRoot = getProjectPath();
+        const existing = (0, r2_1.loadR2Config)(projectRoot);
+        if (existing) {
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'load-settings-r2-config', JSON.stringify(existing));
+            }, 100);
+        }
+    },
+    /**
+     * 设置面板请求加载 Pages 配置
+     */
+    async loadSettingsPages() {
+        const projectRoot = getProjectPath();
+        const existing = (0, pages_1.loadPagesConfig)(projectRoot);
+        if (existing) {
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'load-settings-pages-config', JSON.stringify(existing));
+            }, 100);
         }
     },
     /**
@@ -669,10 +698,9 @@ exports.methods = {
             autoPromptAfterBuild: (_a = existing === null || existing === void 0 ? void 0 : existing.autoPromptAfterBuild) !== null && _a !== void 0 ? _a : true,
         };
         (0, r2_1.saveR2Config)(projectRoot, config);
-        Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
-            text: '✅ 配置已保存',
-            color: '#4ec9b0',
-        }));
+        const statusMsg = JSON.stringify({ text: '✅ 配置已保存', color: '#4ec9b0' });
+        Editor.Message.send('framework-plugin', 'set-r2-config-status', statusMsg);
+        Editor.Message.send('framework-plugin', 'set-settings-r2-status', statusMsg);
         console.log('[R2] 配置已保存到 .r2config.json');
     },
     /**
@@ -687,28 +715,22 @@ exports.methods = {
             return;
         }
         if (!input.accountId || !input.accessKeyId || !input.secretAccessKey || !input.bucketName) {
-            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
-                text: '❌ 请先填写所有字段',
-                color: '#f44747',
-                verified: false,
-            }));
+            const msg = JSON.stringify({ text: '❌ 请先填写所有字段', color: '#f44747', verified: false });
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-r2-status', msg);
             return;
         }
         const config = Object.assign(Object.assign({}, input), { autoPromptAfterBuild: true });
         const result = await (0, r2_1.testConnection)(config);
         if (result.success) {
-            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
-                text: '✅ 连接成功！',
-                color: '#4ec9b0',
-                verified: true,
-            }));
+            const msg = JSON.stringify({ text: '✅ 连接成功！', color: '#4ec9b0', verified: true });
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-r2-status', msg);
         }
         else {
-            Editor.Message.send('framework-plugin', 'set-r2-config-status', JSON.stringify({
-                text: `❌ 连接失败：${result.error}`,
-                color: '#f44747',
-                verified: false,
-            }));
+            const msg = JSON.stringify({ text: `❌ 连接失败：${result.error}`, color: '#f44747', verified: false });
+            Editor.Message.send('framework-plugin', 'set-r2-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-r2-status', msg);
         }
     },
     /**
@@ -979,6 +1001,23 @@ exports.methods = {
         Editor.Dialog.info('构建后自动询问上传 R2\n\n❌ 已关闭', { buttons: ['确定'] });
     },
     /**
+     * 切换构建后自动询问上传（由设置面板触发）
+     */
+    async toggleAutoPrompt(enabledStr) {
+        const enabled = enabledStr === 'true';
+        const projectRoot = getProjectPath();
+        const config = (0, r2_1.loadR2Config)(projectRoot) || {
+            accountId: '',
+            accessKeyId: '',
+            secretAccessKey: '',
+            bucketName: '',
+            autoPromptAfterBuild: false,
+        };
+        config.autoPromptAfterBuild = enabled;
+        (0, r2_1.saveR2Config)(projectRoot, config);
+        console.log(`[R2] 构建后自动询问上传：${enabled ? '✅ 已开启' : '❌ 已关闭'}`);
+    },
+    /**
      * 构建后自动询问上传（由 hooks 触发）
      */
     async promptUploadAfterBuild(buildInfoStr) {
@@ -1041,17 +1080,15 @@ exports.methods = {
         try {
             const config = JSON.parse(configStr);
             (0, pages_1.savePagesConfig)(projectRoot, config);
-            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                text: '✅ 配置已保存',
-                color: '#4ec9b0',
-            }));
+            const msg = JSON.stringify({ text: '✅ 配置已保存', color: '#4ec9b0' });
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
             console.log('[Pages] 配置已保存到 .pagesconfig.json');
         }
         catch (_a) {
-            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                text: '❌ 保存失败',
-                color: '#f44747',
-            }));
+            const msg = JSON.stringify({ text: '❌ 保存失败', color: '#f44747' });
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
         }
     },
     /**
@@ -1062,20 +1099,18 @@ exports.methods = {
         try {
             const config = JSON.parse(configStr);
             if (!config.pagesApiToken) {
-                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                    text: '❌ 请先填写 API Token',
-                    color: '#f44747',
-                }));
+                const msg = JSON.stringify({ text: '❌ 请先填写 API Token', color: '#f44747' });
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+                Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
                 return;
             }
             // 找第一个配置了的项目测试
             const r2config = (0, r2_1.loadR2Config)(getProjectPath());
             const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
             if (!accountId) {
-                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                    text: '❌ 请先在 R2 配置中填写 Account ID',
-                    color: '#f44747',
-                }));
+                const msg = JSON.stringify({ text: '❌ 请先在 R2 配置中填写 Account ID', color: '#f44747' });
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+                Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
                 return;
             }
             let projectName = '';
@@ -1086,23 +1121,23 @@ exports.methods = {
                 }
             }
             if (!projectName) {
-                Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                    text: '❌ 请至少配置一个环境的项目名',
-                    color: '#f44747',
-                }));
+                const msg = JSON.stringify({ text: '❌ 请至少配置一个环境的项目名', color: '#f44747' });
+                Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+                Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
                 return;
             }
             const result = await (0, pages_1.testPagesConnection)(config.pagesApiToken, accountId, projectName);
-            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
+            const msg = JSON.stringify({
                 text: result.success ? `✅ 连接成功 (${projectName})` : `❌ 连接失败: ${result.error}`,
                 color: result.success ? '#4ec9b0' : '#f44747',
-            }));
+            });
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
         }
         catch (e) {
-            Editor.Message.send('framework-plugin', 'set-pages-config-status', JSON.stringify({
-                text: `❌ ${e.message}`,
-                color: '#f44747',
-            }));
+            const msg = JSON.stringify({ text: `❌ ${e.message}`, color: '#f44747' });
+            Editor.Message.send('framework-plugin', 'set-pages-config-status', msg);
+            Editor.Message.send('framework-plugin', 'set-settings-pages-status', msg);
         }
     },
     /**
