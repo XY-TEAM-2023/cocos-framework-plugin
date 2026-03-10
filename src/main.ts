@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import {
     loadR2Config, saveR2Config, isR2Configured, createS3Client,
     testConnection, scanBuildUploadAssets, uploadBundle, deleteVersionDir,
-    checkVersionExists,
+    checkVersionExists, checkBundleChanged,
     listR2Platforms, listR2Bundles, listR2BundleVersions,
     listR2AllBundleVersions, getR2BundleVersions, setR2BundleVersion,
     R2Config, BundleVersionEntry, UploadProgress,
@@ -814,7 +814,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         const projectRoot = getProjectPath();
         const config = loadR2Config(projectRoot);
         if (!config || !isR2Configured(config)) {
-            await log('[R2] 配置无效', 'error');
+            await log('[R2] \u914d\u7f6e\u65e0\u6548', 'error');
             return;
         }
 
@@ -822,27 +822,28 @@ export const methods: { [key: string]: (...args: any) => any } = {
         try {
             selections = JSON.parse(selectionsStr);
         } catch {
-            console.error('[R2] 选择数据解析失败');
+            console.error('[R2] \u9009\u62e9\u6570\u636e\u89e3\u6790\u5931\u8d25');
             return;
         }
 
         uploadCancelled = false;
         const client = createS3Client(config);
 
-        // 切换面板到上传模式
+        // \u5207\u6362\u9762\u677f\u5230\u4e0a\u4f20\u6a21\u5f0f
         Editor.Message.send('framework-plugin', 'set-uploading', 'true');
 
-        console.log('[R2] ========== 上传到 R2 ☁️ ==========');
-        console.log(`[R2] 选择了 ${selections.length} 个版本`);
+        console.log('[R2] ========== \u4e0a\u4f20\u5230 R2 \u2601\ufe0f ==========');
+        console.log(`[R2] \u9009\u62e9\u4e86 ${selections.length} \u4e2a\u7248\u672c`);
 
-        let successCount = 0;
+        // ======= \u7b2c\u4e00\u9636\u6bb5\uff1a\u53d8\u66f4\u68c0\u6d4b =======
+        console.log('[R2] --- \u5f00\u59cb\u53d8\u66f4\u68c0\u6d4b ---');
+        const toUpload: Array<{ sel: typeof selections[0]; entry: BundleVersionEntry }> = [];
         let skipCount = 0;
-        let failCount = 0;
 
         for (const sel of selections) {
             if (uploadCancelled) break;
 
-            const isApp = sel.bundleName === '📦 app';
+            const isApp = sel.bundleName === '\ud83d\udce6 app';
             const localDir = isApp
                 ? path.join(projectRoot, 'build_upload_assets', sel.platform, 'app', sel.version)
                 : path.join(projectRoot, 'build_upload_assets', sel.platform, 'remote', sel.bundleName, sel.version);
@@ -854,7 +855,62 @@ export const methods: { [key: string]: (...args: any) => any } = {
                 localDir,
             };
 
-            console.log(`[R2] 上传 ${sel.platform}/${sel.bundleName}/${sel.version}...`);
+            // \u66f4\u65b0\u72b6\u6001\u2192\u68c0\u67e5\u4e2d
+            Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                platform: sel.platform, bundleName: sel.bundleName,
+                status: '\u68c0\u67e5\u4e2d...', color: '#569cd6',
+            }));
+
+            const changeResult = await checkBundleChanged(client, config.bucketName, entry);
+
+            if (changeResult === 'unchanged') {
+                skipCount++;
+                console.log(`[R2] \u23ed\ufe0f ${sel.platform}/${sel.bundleName}/${sel.version} \u65e0\u7248\u672c\u53d8\u5316\uff0c\u8df3\u8fc7\u4e0a\u4f20`);
+                Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                    platform: sel.platform, bundleName: sel.bundleName,
+                    status: '\u65e0\u66f4\u65b0', color: '#6a9955',
+                }));
+            } else {
+                const label = changeResult === 'new' ? '\u65b0\u7248\u672c' : '\u6709\u66f4\u65b0';
+                console.log(`[R2] \u2139\ufe0f ${sel.platform}/${sel.bundleName}/${sel.version} ${label}`);
+                Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                    platform: sel.platform, bundleName: sel.bundleName,
+                    status: label, color: '#dcdcaa',
+                }));
+                toUpload.push({ sel, entry });
+            }
+        }
+
+        if (uploadCancelled) {
+            Editor.Message.send('framework-plugin', 'set-uploading', 'false');
+            Editor.Message.send('framework-plugin', 'set-upload-error', '\u4e0a\u4f20\u5df2\u53d6\u6d88');
+            console.log('[R2] ========== \u4e0a\u4f20\u5df2\u53d6\u6d88 \u26a0\ufe0f ==========');
+            return;
+        }
+
+        if (toUpload.length === 0) {
+            Editor.Message.send('framework-plugin', 'set-uploading', 'false');
+            const msg = `\u2705 \u6240\u6709 ${skipCount} \u4e2a Bundle \u5747\u65e0\u53d8\u5316\uff0c\u65e0\u9700\u4e0a\u4f20`;
+            Editor.Message.send('framework-plugin', 'set-upload-complete', msg);
+            console.log(`[R2] ========== ${msg} ==========`);
+            return;
+        }
+
+        console.log(`[R2] --- \u68c0\u6d4b\u5b8c\u6210\uff1a${toUpload.length} \u4e2a\u9700\u4e0a\u4f20\uff0c${skipCount} \u4e2a\u8df3\u8fc7 ---`);
+
+        // ======= \u7b2c\u4e8c\u9636\u6bb5\uff1a\u4e0a\u4f20 =======
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const { sel, entry } of toUpload) {
+            if (uploadCancelled) break;
+
+            Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                platform: sel.platform, bundleName: sel.bundleName,
+                status: '\u4e0a\u4f20\u4e2d...', color: '#569cd6',
+            }));
+
+            console.log(`[R2] \u4e0a\u4f20 ${sel.platform}/${sel.bundleName}/${sel.version}...`);
 
             const result = await uploadBundle({
                 client,
@@ -874,20 +930,27 @@ export const methods: { [key: string]: (...args: any) => any } = {
             switch (result) {
                 case 'success':
                     successCount++;
-                    console.log(`[R2] ✅ ${sel.platform}/${sel.bundleName}/${sel.version} 上传成功`);
+                    console.log(`[R2] \u2705 ${sel.platform}/${sel.bundleName}/${sel.version} \u4e0a\u4f20\u6210\u529f`);
+                    Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                        platform: sel.platform, bundleName: sel.bundleName,
+                        status: '\u5df2\u5b8c\u6210', color: '#4ec9b0',
+                    }));
                     break;
                 case 'skipped':
                     skipCount++;
-                    console.log(`[R2] ⏭️ ${sel.platform}/${sel.bundleName}/${sel.version} 已存在，跳过`);
+                    console.log(`[R2] \u23ed\ufe0f ${sel.platform}/${sel.bundleName}/${sel.version} \u5df2\u5b58\u5728\uff0c\u8df3\u8fc7`);
+                    Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                        platform: sel.platform, bundleName: sel.bundleName,
+                        status: '\u5df2\u8df3\u8fc7', color: '#6a9955',
+                    }));
                     break;
                 case 'cancelled':
-                    console.log(`[R2] 上传已取消`);
+                    console.log(`[R2] \u4e0a\u4f20\u5df2\u53d6\u6d88`);
                     break;
                 case 'failed': {
-                    // 询问是否重试
                     const retry = await Editor.Dialog.warn(
-                        `上传失败\n\n${sel.platform}/${sel.bundleName}/${sel.version}\n\n是否重试？`,
-                        { buttons: ['重试', '停止上传'], default: 0, cancel: 1 }
+                        `\u4e0a\u4f20\u5931\u8d25\n\n${sel.platform}/${sel.bundleName}/${sel.version}\n\n\u662f\u5426\u91cd\u8bd5\uff1f`,
+                        { buttons: ['\u91cd\u8bd5', '\u505c\u6b62\u4e0a\u4f20'], default: 0, cancel: 1 }
                     );
                     if (retry.response === 0) {
                         const retryResult = await uploadBundle({
@@ -906,25 +969,35 @@ export const methods: { [key: string]: (...args: any) => any } = {
                         });
                         if (retryResult === 'success') {
                             successCount++;
-                            console.log(`[R2] ✅ ${sel.platform}/${sel.bundleName}/${sel.version} 重试上传成功`);
+                            console.log(`[R2] \u2705 ${sel.platform}/${sel.bundleName}/${sel.version} \u91cd\u8bd5\u4e0a\u4f20\u6210\u529f`);
+                            Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                                platform: sel.platform, bundleName: sel.bundleName,
+                                status: '\u5df2\u5b8c\u6210', color: '#4ec9b0',
+                            }));
                         } else {
                             failCount++;
-                            console.log(`[R2] ❌ ${sel.platform}/${sel.bundleName}/${sel.version} 重试仍失败`);
-                            const isApp = sel.bundleName === '📦 app';
-                            const keyPrefix = isApp
+                            console.log(`[R2] \u274c ${sel.platform}/${sel.bundleName}/${sel.version} \u91cd\u8bd5\u4ecd\u5931\u8d25`);
+                            Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                                platform: sel.platform, bundleName: sel.bundleName,
+                                status: '\u5931\u8d25', color: '#f44747',
+                            }));
+                            const keyPrefix = sel.bundleName === '\ud83d\udce6 app'
                                 ? `${sel.platform}/app/${sel.version}`
                                 : `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
                             await deleteVersionDir(client, config.bucketName, keyPrefix);
-                            console.log(`[R2] 已清理远端不完整版本`);
+                            console.log(`[R2] \u5df2\u6e05\u7406\u8fdc\u7aef\u4e0d\u5b8c\u6574\u7248\u672c`);
                         }
                     } else {
                         failCount++;
-                        const isApp = sel.bundleName === '📦 app';
-                        const keyPrefix = isApp
+                        Editor.Message.send('framework-plugin', 'update-bundle-status', JSON.stringify({
+                            platform: sel.platform, bundleName: sel.bundleName,
+                            status: '\u5931\u8d25', color: '#f44747',
+                        }));
+                        const keyPrefix = sel.bundleName === '\ud83d\udce6 app'
                             ? `${sel.platform}/app/${sel.version}`
                             : `${sel.platform}/remote/${sel.bundleName}/${sel.version}`;
                         await deleteVersionDir(client, config.bucketName, keyPrefix);
-                        console.log(`[R2] 已清理远端不完整版本`);
+                        console.log(`[R2] \u5df2\u6e05\u7406\u8fdc\u7aef\u4e0d\u5b8c\u6574\u7248\u672c`);
                         uploadCancelled = true;
                     }
                     break;
@@ -934,14 +1007,14 @@ export const methods: { [key: string]: (...args: any) => any } = {
             if (uploadCancelled) break;
         }
 
-        // 恢复面板
+        // \u6062\u590d\u9762\u677f
         Editor.Message.send('framework-plugin', 'set-uploading', 'false');
 
         if (uploadCancelled) {
-            Editor.Message.send('framework-plugin', 'set-upload-error', '上传已取消');
-            console.log('[R2] ========== 上传已取消 ⚠️ ==========');
+            Editor.Message.send('framework-plugin', 'set-upload-error', '\u4e0a\u4f20\u5df2\u53d6\u6d88');
+            console.log('[R2] ========== \u4e0a\u4f20\u5df2\u53d6\u6d88 \u26a0\ufe0f ==========');
         } else {
-            const summary = `✅ ${successCount} 成功，⏭️ ${skipCount} 跳过，❌ ${failCount} 失败`;
+            const summary = `\u2705 ${successCount} \u6210\u529f\uff0c\u23ed\ufe0f ${skipCount} \u8df3\u8fc7\uff0c\u274c ${failCount} \u5931\u8d25`;
             Editor.Message.send('framework-plugin', 'set-upload-complete', summary);
             console.log(`[R2] ========== ${summary} ==========`);
         }

@@ -108,7 +108,7 @@ export async function testConnection(config: R2Config): Promise<{ success: boole
     }
 }
 
-// ==================== 版本检查 ====================
+// ==================== 变更检测 ====================
 
 /**
  * 检查 R2 上某个 bundle 版本是否已完整上传
@@ -119,7 +119,10 @@ export async function checkVersionExists(
     bucket: string,
     entry: BundleVersionEntry
 ): Promise<'complete' | 'incomplete' | 'not_found'> {
-    const manifestKey = `${entry.platform}/remote/${entry.bundleName}/${entry.version}/manifest.json`;
+    const isApp = entry.bundleName === '📦 app';
+    const manifestKey = isApp
+        ? `${entry.platform}/app/${entry.version}/manifest.json`
+        : `${entry.platform}/remote/${entry.bundleName}/${entry.version}/manifest.json`;
 
     try {
         const response = await client.send(new GetObjectCommand({
@@ -148,6 +151,124 @@ export async function checkVersionExists(
         }
         // 其他网络错误也视为 not_found，允许上传
         return 'not_found';
+    }
+}
+
+/**
+ * 检查本地 bundle/app 相比 R2 上最新版本是否有变更
+ *
+ * 对比策略：
+ *   1. 先检查同版本号是否已完整上传到 R2 → 如果是则 'unchanged'
+ *   2. Bundle: 读取 R2 version_dev → 用该版本号下载 manifest.json → 与本地对比
+ *   3. App:    列出 {platform}/app/ 下所有版本目录 → 取最新 → 下载 manifest → 对比
+ *
+ * 返回值：
+ *   - 'new'       远端无此 bundle/app 的任何版本（首次上传）
+ *   - 'changed'   manifest 不同，需要上传
+ *   - 'unchanged' manifest 一致或同版本已存在，可跳过
+ */
+export async function checkBundleChanged(
+    client: S3Client,
+    bucket: string,
+    entry: BundleVersionEntry,
+): Promise<'changed' | 'unchanged' | 'new'> {
+    const isApp = entry.bundleName === '📦 app';
+
+    try {
+        // Step 1: 先检查同版本号是否已完整存在于 R2
+        const sameVersionStatus = await checkVersionExists(client, bucket, entry);
+        if (sameVersionStatus === 'complete') {
+            return 'unchanged'; // 同版本已上传过，无需重复上传
+        }
+
+        // Step 2: 对比最新版本的 manifest
+        let latestManifestKey: string;
+
+        if (isApp) {
+            // App: 列出 {platform}/app/ 下的版本目录，取最新
+            const prefix = `${entry.platform}/app/`;
+            const versions: string[] = [];
+            let continuationToken: string | undefined;
+
+            do {
+                const resp = await client.send(new ListObjectsV2Command({
+                    Bucket: bucket,
+                    Prefix: prefix,
+                    Delimiter: '/',
+                    ContinuationToken: continuationToken,
+                }));
+                if (resp.CommonPrefixes) {
+                    for (const cp of resp.CommonPrefixes) {
+                        if (cp.Prefix) {
+                            const name = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+                            if (name) versions.push(name);
+                        }
+                    }
+                }
+                continuationToken = resp.NextContinuationToken;
+            } while (continuationToken);
+
+            if (versions.length === 0) return 'new';
+
+            // 版本号是时间戳字符串，按字符排序取最大
+            const latestVersion = versions.sort().reverse()[0];
+            latestManifestKey = `${entry.platform}/app/${latestVersion}/manifest.json`;
+        } else {
+            // Bundle: 读取 version_dev 获取最新版本号
+            const versionKey = `${entry.platform}/remote/${entry.bundleName}/version_dev`;
+            let latestVersion: string | null = null;
+
+            try {
+                const resp = await client.send(new GetObjectCommand({ Bucket: bucket, Key: versionKey }));
+                const text = await resp.Body?.transformToString('utf-8');
+                if (text?.trim()) {
+                    latestVersion = text.trim();
+                }
+            } catch (e: any) {
+                if (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404) {
+                    return 'new'; // 从未上传过
+                }
+                throw e;
+            }
+
+            if (!latestVersion) return 'new';
+
+            latestManifestKey = `${entry.platform}/remote/${entry.bundleName}/${latestVersion}/manifest.json`;
+        }
+
+        // 下载远端 manifest
+        let remoteManifest: string;
+        try {
+            const resp = await client.send(new GetObjectCommand({
+                Bucket: bucket,
+                Key: latestManifestKey,
+            }));
+            const text = await resp.Body?.transformToString('utf-8');
+            if (!text) return 'new';
+            remoteManifest = text;
+        } catch (e: any) {
+            if (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404) {
+                return 'new';
+            }
+            throw e;
+        }
+
+        // 读取本地 manifest
+        const localManifestPath = path.join(entry.localDir, 'manifest.json');
+        if (!fs.existsSync(localManifestPath)) {
+            // 本地没有 manifest，视为有变更
+            return 'changed';
+        }
+        const localManifest = fs.readFileSync(localManifestPath, 'utf-8');
+
+        // 对比
+        if (remoteManifest.trim() === localManifest.trim()) {
+            return 'unchanged';
+        }
+        return 'changed';
+    } catch (e: any) {
+        console.warn(`[R2] 变更检测失败 (${entry.bundleName}): ${e.message}，视为有变更`);
+        return 'changed'; // 检测失败时保守处理，允许上传
     }
 }
 

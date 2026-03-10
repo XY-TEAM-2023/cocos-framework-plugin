@@ -79,6 +79,8 @@ exports.style = `
     display: flex;
     align-items: center;
     gap: 6px;
+    padding: 2px 0;
+    user-select: none;
 }
 .tree-bundle {
     margin-left: 20px;
@@ -90,9 +92,17 @@ exports.style = `
 .tree-bundle label {
     cursor: pointer;
     color: #d4d4d4;
+    flex: 1;
 }
 .tree-bundle label:hover {
     color: #fff;
+}
+.bundle-status {
+    font-size: 11px;
+    color: #888;
+    min-width: 60px;
+    text-align: right;
+    white-space: nowrap;
 }
 input[type="checkbox"] {
     accent-color: #0e639c;
@@ -170,6 +180,46 @@ function getSelectedEntries() {
     });
     return result;
 }
+/** Update platform checkbox state based on its children */
+function syncPlatformCheckbox(platformCb) {
+    const platform = platformCb.dataset.platform;
+    const childCbs = treeContainer.querySelectorAll(`.bundle-cb[data-platform="${platform}"]`);
+    const total = childCbs.length;
+    const checked = Array.from(childCbs).filter(cb => cb.checked).length;
+    if (checked === 0) {
+        platformCb.checked = false;
+        platformCb.indeterminate = false;
+    }
+    else if (checked === total) {
+        platformCb.checked = true;
+        platformCb.indeterminate = false;
+    }
+    else {
+        platformCb.checked = false;
+        platformCb.indeterminate = true;
+    }
+}
+function bindPlatformCheckboxes() {
+    if (!treeContainer)
+        return;
+    // Platform checkbox → toggle all children
+    treeContainer.querySelectorAll('.platform-cb').forEach(platformCb => {
+        platformCb.addEventListener('change', () => {
+            const platform = platformCb.dataset.platform;
+            const childCbs = treeContainer.querySelectorAll(`.bundle-cb[data-platform="${platform}"]`);
+            childCbs.forEach(cb => { cb.checked = platformCb.checked; });
+        });
+    });
+    // Bundle checkbox → sync parent platform checkbox
+    treeContainer.querySelectorAll('.bundle-cb').forEach(bundleCb => {
+        bundleCb.addEventListener('change', () => {
+            const platform = bundleCb.dataset.platform;
+            const platformCb = treeContainer.querySelector(`.platform-cb[data-platform="${platform}"]`);
+            if (platformCb)
+                syncPlatformCheckbox(platformCb);
+        });
+    });
+}
 exports.methods = {
     /**
      * 设置树形数据并渲染 checkbox
@@ -180,7 +230,7 @@ exports.methods = {
             return;
         try {
             const data = JSON.parse(dataStr);
-            // 按 platform 分组
+            // Group by platform
             const grouped = {};
             for (const entry of data) {
                 if (!grouped[entry.platform])
@@ -189,22 +239,43 @@ exports.methods = {
             }
             let html = '';
             for (const [platform, bundles] of Object.entries(grouped)) {
+                const platformCbId = `cb-platform-${platform}`;
                 html += `<div class="tree-platform">`;
-                html += `<div class="tree-platform-label">📁 ${platform}</div>`;
+                html += `<label class="tree-platform-label" for="${platformCbId}">`;
+                html += `<input type="checkbox" id="${platformCbId}" class="platform-cb" data-platform="${platform}" checked>`;
+                html += `<span>${platform}</span>`;
+                html += `</label>`;
                 for (const b of bundles) {
                     const id = `cb-${platform}-${b.bundleName}-${b.version}`;
                     html += `<div class="tree-bundle">`;
-                    html += `<input type="checkbox" id="${id}" data-platform="${platform}" data-bundle="${b.bundleName}" data-version="${b.version}" checked>`;
+                    html += `<input type="checkbox" id="${id}" class="bundle-cb" data-platform="${platform}" data-bundle="${b.bundleName}" data-version="${b.version}" checked>`;
                     html += `<label for="${id}">${b.bundleName} / <span style="color: #6a9955;">${b.version}</span></label>`;
+                    html += `<span class="bundle-status" data-status-platform="${platform}" data-status-bundle="${b.bundleName}" style="color: #888;">\u5f85\u4e0a\u4f20</span>`;
                     html += `</div>`;
                 }
                 html += `</div>`;
             }
             treeContainer.innerHTML = html || '<div style="color: #888; padding: 20px; text-align: center;">未找到可上传的构建产物<br>请先执行构建</div>';
+            bindPlatformCheckboxes();
         }
         catch (e) {
             console.error('[Upload Panel] 树形数据解析失败', e);
         }
+    },
+    /**
+     * \u66f4\u65b0\u5355\u4e2a bundle \u7684\u72b6\u6001\u6807\u7b7e
+     * data: { platform, bundleName, status, color }
+     */
+    updateBundleStatus(dataStr) {
+        try {
+            const { platform, bundleName, status, color } = JSON.parse(dataStr);
+            const statusEl = treeContainer === null || treeContainer === void 0 ? void 0 : treeContainer.querySelector(`.bundle-status[data-status-platform="${platform}"][data-status-bundle="${bundleName}"]`);
+            if (statusEl) {
+                statusEl.textContent = status;
+                statusEl.style.color = color || '#888';
+            }
+        }
+        catch (_a) { }
     },
     /**
      * 更新上传进度

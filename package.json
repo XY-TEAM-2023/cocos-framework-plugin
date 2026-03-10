@@ -350,6 +350,11 @@
           "upload.setTreeData"
         ]
       },
+      "update-bundle-status": {
+        "methods": [
+          "upload.updateBundleStatus"
+        ]
+      },
       "update-progress": {
         "methods": [
           "upload.updateProgress"
