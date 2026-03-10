@@ -154,7 +154,7 @@ function _checkPagesConfig() {
     }
     return config;
 }
-async function _loadSwitchVersionData(config, env) {
+async function _loadSwitchVersionData(config, env, page = 1) {
     var _a;
     const r2config = (0, r2_1.loadR2Config)(getProjectPath());
     const accountId = (r2config === null || r2config === void 0 ? void 0 : r2config.accountId) || '';
@@ -162,13 +162,18 @@ async function _loadSwitchVersionData(config, env) {
     if (!projectName || !accountId)
         return;
     try {
-        const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName);
+        const perPage = 10;
+        const deployments = await (0, pages_1.listDeployments)(config.pagesApiToken, accountId, projectName, page, perPage);
         const environments = (0, pages_1.getAvailableEnvironments)(config);
+        // 如果是第一页，发送环境列表
+        // 如果不是第一页，只发送新数据（由面板追加）
         setTimeout(() => {
             Editor.Message.send('framework-plugin', 'set-versions-data', JSON.stringify({
-                environments,
+                environments: page === 1 ? environments : undefined,
                 deployments,
                 currentEnv: env,
+                page,
+                hasMore: deployments.length === perPage,
             }));
         }, 300);
     }
@@ -1111,7 +1116,7 @@ exports.methods = {
      * 切换版本（打开面板）
      */
     async switchPagesVersion() {
-        const config = this._checkPagesConfig();
+        const config = _checkPagesConfig();
         if (!config)
             return;
         const environments = (0, pages_1.getAvailableEnvironments)(config);
@@ -1132,7 +1137,18 @@ exports.methods = {
         if (!config)
             return;
         _currentSwitchEnv = env;
-        await _loadSwitchVersionData(config, env);
+        await _loadSwitchVersionData(config, env, 1);
+    },
+    /**
+     * 加载更多版本
+     */
+    async loadMorePagesVersions(dataStr) {
+        const { page } = JSON.parse(dataStr);
+        const config = (0, pages_1.loadPagesConfig)(getProjectPath());
+        if (!config)
+            return;
+        const env = _currentSwitchEnv;
+        await _loadSwitchVersionData(config, env, page);
     },
     /**
      * 执行版本回滚
@@ -1148,15 +1164,25 @@ exports.methods = {
             const env = _currentSwitchEnv;
             const projectName = (_a = config.pagesProjects[env]) === null || _a === void 0 ? void 0 : _a.projectName;
             const accountId = r2config.accountId;
-            await (0, pages_1.rollbackDeployment)(config.pagesApiToken, accountId, projectName, deploymentId);
+            console.log(`[Pages] 正在切换版本: deploymentId=${deploymentId}, project=${projectName}, env=${env}`);
             Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
-                text: '✅ 已切换版本',
+                text: '正在切换版本...',
+                color: '#569cd6',
+            }));
+            await (0, pages_1.rollbackDeployment)(config.pagesApiToken, accountId, projectName, deploymentId);
+            console.log(`[Pages] 版本切换 API 调用成功，等待 API 状态更新...`);
+            Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
+                text: '✅ 已切换版本，正在刷新列表...',
                 color: '#4ec9b0',
             }));
-            // 刷新列表
-            await _loadSwitchVersionData(config, env);
+            // 等待 Cloudflare API 状态更新后再刷新列表
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            // 刷新列表（重新从第一页加载）
+            await _loadSwitchVersionData(config, env, 1);
+            console.log(`[Pages] 列表已刷新`);
         }
         catch (e) {
+            console.error(`[Pages] 版本切换失败:`, e);
             Editor.Message.send('framework-plugin', 'set-versions-status', JSON.stringify({
                 text: `❌ 切换失败: ${e.message}`,
                 color: '#f44747',
@@ -1168,7 +1194,7 @@ exports.methods = {
      * 清理版本（打开面板）
      */
     async cleanupPagesVersions() {
-        const config = this._checkPagesConfig();
+        const config = _checkPagesConfig();
         if (!config)
             return;
         const environments = (0, pages_1.getAvailableEnvironments)(config);

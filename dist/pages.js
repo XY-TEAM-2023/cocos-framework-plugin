@@ -263,9 +263,16 @@ async function deployFromR2(options) {
 exports.deployFromR2 = deployFromR2;
 // ==================== Pages API ====================
 const API_BASE = 'https://api.cloudflare.com/client/v4';
-async function pagesApiFetch(apiToken, accountId, projectName, endpoint = '', method = 'GET') {
+async function pagesApiFetch(apiToken, accountId, projectName, endpoint = '', method = 'GET', params) {
     var _a;
-    const url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments${endpoint}`;
+    let url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments${endpoint}`;
+    if (params) {
+        const query = new URLSearchParams();
+        for (const key in params) {
+            query.append(key, String(params[key]));
+        }
+        url += `?${query.toString()}`;
+    }
     const resp = await fetch(url, {
         method,
         headers: {
@@ -280,21 +287,42 @@ async function pagesApiFetch(apiToken, accountId, projectName, endpoint = '', me
     }
     return json;
 }
+/** Get the canonical (currently active) deployment ID from the project API */
+async function getCanonicalDeploymentId(apiToken, accountId, projectName) {
+    var _a, _b;
+    try {
+        const url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}`;
+        const resp = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        const json = await resp.json();
+        if (json.success && ((_b = (_a = json.result) === null || _a === void 0 ? void 0 : _a.canonical_deployment) === null || _b === void 0 ? void 0 : _b.id)) {
+            return json.result.canonical_deployment.id;
+        }
+        return null;
+    }
+    catch (_c) {
+        return null;
+    }
+}
 /** 列出部署 */
-async function listDeployments(apiToken, accountId, projectName) {
-    var _a;
-    const json = await pagesApiFetch(apiToken, accountId, projectName);
+async function listDeployments(apiToken, accountId, projectName, page = 1, perPage = 10) {
+    // Fetch deployments and canonical deployment ID in parallel
+    const [json, canonicalId] = await Promise.all([
+        pagesApiFetch(apiToken, accountId, projectName, '', 'GET', {
+            page,
+            per_page: perPage,
+        }),
+        page === 1 ? getCanonicalDeploymentId(apiToken, accountId, projectName) : Promise.resolve(null),
+    ]);
     const deployments = json.result || [];
-    // 标记当前生产版本（第一个 environment=production 且 status=success 的）
-    let foundProduction = false;
+    // Mark the canonical (currently active) deployment
     for (const d of deployments) {
-        if (!foundProduction && d.environment === 'production' && ((_a = d.latest_stage) === null || _a === void 0 ? void 0 : _a.status) === 'success') {
-            d.is_current = true;
-            foundProduction = true;
-        }
-        else {
-            d.is_current = false;
-        }
+        d.is_current = !!(canonicalId && d.id === canonicalId);
     }
     return deployments;
 }

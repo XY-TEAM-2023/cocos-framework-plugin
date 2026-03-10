@@ -310,8 +310,17 @@ async function pagesApiFetch(
     projectName: string,
     endpoint: string = '',
     method: string = 'GET',
+    params?: Record<string, string | number>,
 ): Promise<any> {
-    const url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments${endpoint}`;
+    let url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments${endpoint}`;
+
+    if (params) {
+        const query = new URLSearchParams();
+        for (const key in params) {
+            query.append(key, String(params[key]));
+        }
+        url += `?${query.toString()}`;
+    }
 
     const resp = await fetch(url, {
         method,
@@ -329,24 +338,52 @@ async function pagesApiFetch(
     return json;
 }
 
+/** Get the canonical (currently active) deployment ID from the project API */
+async function getCanonicalDeploymentId(
+    apiToken: string,
+    accountId: string,
+    projectName: string,
+): Promise<string | null> {
+    try {
+        const url = `${API_BASE}/accounts/${accountId}/pages/projects/${projectName}`;
+        const resp = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        const json = await resp.json();
+        if (json.success && json.result?.canonical_deployment?.id) {
+            return json.result.canonical_deployment.id;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 /** 列出部署 */
 export async function listDeployments(
     apiToken: string,
     accountId: string,
     projectName: string,
+    page: number = 1,
+    perPage: number = 10,
 ): Promise<PagesDeployment[]> {
-    const json = await pagesApiFetch(apiToken, accountId, projectName);
+    // Fetch deployments and canonical deployment ID in parallel
+    const [json, canonicalId] = await Promise.all([
+        pagesApiFetch(apiToken, accountId, projectName, '', 'GET', {
+            page,
+            per_page: perPage,
+        }),
+        page === 1 ? getCanonicalDeploymentId(apiToken, accountId, projectName) : Promise.resolve(null),
+    ]);
     const deployments: PagesDeployment[] = json.result || [];
 
-    // 标记当前生产版本（第一个 environment=production 且 status=success 的）
-    let foundProduction = false;
+    // Mark the canonical (currently active) deployment
     for (const d of deployments) {
-        if (!foundProduction && d.environment === 'production' && d.latest_stage?.status === 'success') {
-            d.is_current = true;
-            foundProduction = true;
-        } else {
-            d.is_current = false;
-        }
+        d.is_current = !!(canonicalId && d.id === canonicalId);
     }
 
     return deployments;

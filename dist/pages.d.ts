@@ -72,7 +72,7 @@ export declare function deployFromR2(options: DeployOptions): Promise<{
     error?: string;
 }>;
 /** 列出部署 */
-export declare function listDeployments(apiToken: string, accountId: string, projectName: string): Promise<PagesDeployment[]>;
+export declare function listDeployments(apiToken: string, accountId: string, projectName: string, page?: number, perPage?: number): Promise<PagesDeployment[]>;
 /** 回滚到指定部署 */
 export declare function rollbackDeployment(apiToken: string, accountId: string, projectName: string, deploymentId: string): Promise<void>;
 /** 删除部署 */

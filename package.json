@@ -445,6 +445,11 @@
           "pages-versions.setStatus"
         ]
       },
+      "load-more-pages-versions": {
+        "methods": [
+          "loadMorePagesVersions"
+        ]
+      },
       "cleanup-pages-versions": {
         "methods": [
           "cleanupPagesVersions"
