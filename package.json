@@ -129,36 +129,6 @@
     "builder": "./dist/builder",
     "menu": [
       {
-        "path": "框架",
-        "label": "更新框架",
-        "message": "update-framework"
-      },
-      {
-        "path": "框架",
-        "label": "切换框架版本",
-        "message": "switch-version"
-      },
-      {
-        "path": "框架",
-        "label": "修复框架",
-        "message": "repair-framework"
-      },
-      {
-        "path": "框架/开发/框架",
-        "label": "推送版本",
-        "message": "publish-framework"
-      },
-      {
-        "path": "框架/开发/插件",
-        "label": "本地构建",
-        "message": "build-plugin"
-      },
-      {
-        "path": "框架/开发/插件",
-        "label": "推送版本",
-        "message": "publish-plugin"
-      },
-      {
         "path": "框架/R2",
         "label": "配置 R2",
         "message": "config-r2"
@@ -179,34 +149,54 @@
         "message": "disable-auto-prompt"
       },
       {
-        "path": "框架/Bundle",
-        "label": "版本管理",
-        "message": "manage-bundle-versions"
-      },
-      {
-        "path": "框架",
-        "label": "关于",
-        "message": "show-about"
-      },
-      {
-        "path": "框架/Pages",
-        "label": "配置 Pages",
-        "message": "config-pages"
-      },
-      {
-        "path": "框架/Pages",
-        "label": "部署到 Pages",
+        "path": "框架/版本管理",
+        "label": "从R2部署APP",
         "message": "deploy-to-pages"
       },
       {
-        "path": "框架/Pages",
-        "label": "切换版本",
+        "path": "框架/版本管理",
+        "label": "切换APP版本",
         "message": "switch-pages-version"
       },
       {
-        "path": "框架/Pages",
-        "label": "清理版本",
+        "path": "框架/版本管理",
+        "label": "切换Bundle版本",
+        "message": "manage-bundle-versions"
+      },
+      {
+        "path": "框架/版本管理/清理",
+        "label": "清理APP版本",
         "message": "cleanup-pages-versions"
+      },
+      {
+        "path": "框架",
+        "label": "插件设置",
+        "message": "config-pages"
+      },
+      {
+        "path": "框架",
+        "label": "更新框架",
+        "message": "update-framework"
+      },
+      {
+        "path": "框架",
+        "label": "修复框架",
+        "message": "repair-framework"
+      },
+      {
+        "path": "框架/开发",
+        "label": "构建插件",
+        "message": "build-plugin"
+      },
+      {
+        "path": "框架/开发",
+        "label": "推送插件版本",
+        "message": "publish-plugin"
+      },
+      {
+        "path": "框架/开发",
+        "label": "推送框架版本",
+        "message": "publish-framework"
       }
     ],
     "messages": {
@@ -490,46 +480,46 @@
           "manageBundleVersions"
         ]
       },
-        "load-bundle-platforms": {
-          "methods": [
-            "loadBundlePlatforms"
-          ]
-        },
-        "set-bundle-platforms": {
-          "methods": [
-            "bundle-versions.setBundlePlatforms"
-          ]
-        },
-        "load-bundle-tree-by-platform": {
-          "methods": [
-            "loadBundleTreeByPlatform"
-          ]
-        },
-        "set-bundle-tree": {
-          "methods": [
-            "bundle-versions.setBundleTree"
-          ]
-        },
-        "load-bundle-version-list": {
-          "methods": [
-            "loadBundleVersionList"
-          ]
-        },
-        "set-bundle-version-list": {
-          "methods": [
-            "bundle-versions.setBundleVersionList"
-          ]
-        },
-        "switch-bundle-version": {
-          "methods": [
-            "doSwitchBundleVersion"
-          ]
-        },
-        "switch-bundle-version-result": {
-          "methods": [
-            "bundle-versions.switchBundleVersionResult"
-          ]
-        }
+      "load-bundle-platforms": {
+        "methods": [
+          "loadBundlePlatforms"
+        ]
+      },
+      "set-bundle-platforms": {
+        "methods": [
+          "bundle-versions.setBundlePlatforms"
+        ]
+      },
+      "load-bundle-tree-by-platform": {
+        "methods": [
+          "loadBundleTreeByPlatform"
+        ]
+      },
+      "set-bundle-tree": {
+        "methods": [
+          "bundle-versions.setBundleTree"
+        ]
+      },
+      "load-bundle-version-list": {
+        "methods": [
+          "loadBundleVersionList"
+        ]
+      },
+      "set-bundle-version-list": {
+        "methods": [
+          "bundle-versions.setBundleVersionList"
+        ]
+      },
+      "switch-bundle-version": {
+        "methods": [
+          "doSwitchBundleVersion"
+        ]
+      },
+      "switch-bundle-version-result": {
+        "methods": [
+          "bundle-versions.switchBundleVersionResult"
+        ]
+      }
     }
   },
   "author": "XY-TEAM",
