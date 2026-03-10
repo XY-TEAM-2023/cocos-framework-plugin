@@ -12,6 +12,7 @@
 
 import * as fs from 'fs';
 import { loadR2Config, isR2Configured } from './r2';
+import { getEffectiveConfig, getEnabledEnvironments, generateMultiEnvApks } from './android';
 import * as path from 'path';
 
 let crypto: any;
@@ -187,7 +188,7 @@ function copyDirRecursive(src: string, dest: string): void {
  * - android：仅复制 buildDest/data/remote 中的内容
  * - 其他平台：输出提示暂未完成
  */
-function copyToBuildUploadAssets(buildDest: string, projectRoot: string, version: string): void {
+async function copyToBuildUploadAssets(buildDest: string, projectRoot: string, version: string): Promise<void> {
     const platformName = path.basename(buildDest);
     const uploadRoot = path.join(projectRoot, 'build_upload_assets');
     const targetDir = path.join(uploadRoot, platformName);
@@ -226,35 +227,65 @@ function copyToBuildUploadAssets(buildDest: string, projectRoot: string, version
     }
 
     // ====== App 产物收集 ======
-    copyAppArtifact(buildDest, projectRoot, platformName, version);
+    await copyAppArtifact(buildDest, projectRoot, platformName, version);
 }
 
 /**
  * 收集 App 主体产物到 build_upload_assets/{platform}/app/{version}/
  */
-function copyAppArtifact(buildDest: string, projectRoot: string, platformName: string, version: string): void {
+async function copyAppArtifact(buildDest: string, projectRoot: string, platformName: string, version: string): Promise<void> {
     const uploadRoot = path.join(projectRoot, 'build_upload_assets');
     const appVersionDir = path.join(uploadRoot, platformName, 'app', version);
 
     if (platformName === 'android') {
-        // Android: 复制 APK
-        const releaseDir = path.join(buildDest, 'publish', 'release');
-        if (!fs.existsSync(releaseDir)) {
-            console.warn(`[BuildUpload] ⚠️ 未找到 ${releaseDir}，跳过 Android APK 收集`);
+        // Android: 多环境 APK 构建
+        const androidConfig = getEffectiveConfig(projectRoot);
+        const enabledEnvs = getEnabledEnvironments(androidConfig);
+
+        if (enabledEnvs.length === 0) {
+            console.warn('[BuildUpload] Android 多环境构建：未勾选任何环境，跳过');
             return;
         }
-        const apkFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.apk'));
-        if (apkFiles.length === 0) {
-            console.warn(`[BuildUpload] ⚠️ ${releaseDir} 中未找到 APK 文件`);
-            return;
+
+        console.log(`[BuildUpload] 开始 Android 多环境 APK 构建: ${enabledEnvs.join(', ')}`);
+
+        // 打开日志面板
+        try {
+            Editor.Message.send('framework-plugin', 'open-log-panel');
+            Editor.Message.send('framework-plugin', 'set-title', 'Android 多环境构建');
+        } catch {
+            // 忽略，面板可能不可用
         }
-        fs.mkdirSync(appVersionDir, { recursive: true });
-        const srcApk = path.join(releaseDir, apkFiles[0]);
-        const destApk = path.join(appVersionDir, 'app.apk');
-        fs.copyFileSync(srcApk, destApk);
-        // 写入 manifest
-        fs.writeFileSync(path.join(appVersionDir, 'manifest.json'), JSON.stringify({ version }, null, 2), 'utf-8');
-        console.log(`[BuildUpload] ✅ 已复制 APK → ${destApk}`);
+
+        const logFn = (message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') => {
+            console.log(`[Android] ${message}`);
+            try {
+                Editor.Message.send('framework-plugin', 'append-log', JSON.stringify({
+                    message, type, time: new Date().toLocaleTimeString(),
+                }));
+            } catch {}
+        };
+
+        try {
+            const results = await generateMultiEnvApks({
+                buildDest,
+                projectRoot,
+                version,
+                environments: enabledEnvs,
+                onLog: logFn,
+            });
+
+            const successCount = results.filter(r => r.success).length;
+            logFn(
+                `多环境 APK 构建完成: ${successCount}/${enabledEnvs.length} 成功`,
+                successCount === enabledEnvs.length ? 'success' : 'warn'
+            );
+        } catch (err: any) {
+            console.error('[BuildUpload] Android 多环境构建出错:', err);
+            logFn(`多环境构建出错: ${err.message}`, 'error');
+        }
+
+        return; // 多环境构建已处理完毕
 
     } else if (platformName === 'web-mobile' || platformName === 'web-desktop') {
         // Web: 复制整个构建目录，删除 remote/
@@ -407,7 +438,7 @@ export async function onAfterBuild(options: IBuildTaskOptions, result?: IBuildRe
         console.log('[Manifest] ========== manifest 生成完成 ✅ ==========');
 
         // 整理构建产物到 build_upload_assets
-        copyToBuildUploadAssets(buildDest, projectRoot, version);
+        await copyToBuildUploadAssets(buildDest, projectRoot, version);
 
         // 构建后自动询问上传 R2
         try {

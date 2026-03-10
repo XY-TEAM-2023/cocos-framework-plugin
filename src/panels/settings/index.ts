@@ -1,16 +1,19 @@
 /**
- * 插件设置面板（合并 R2 + Pages 配置）
+ * 插件设置面板（合并 R2 + Pages + Android 配置）
  *
- * 顶部两个 Tab 切换 R2 / Pages 配置区
+ * 顶部三个 Tab 切换 R2 / Pages / Android 配置区
  */
 
 // ==================== 状态 ====================
 
 let panelRef: any = null;
-let activeSection: 'r2' | 'pages' = 'r2';
+let activeSection: 'r2' | 'pages' | 'android' = 'r2';
 
 // R2
 let r2ConnectionVerified = false;
+
+// Android
+let androidEnvValues = { dev: true, beta: true, prod: true };
 
 // Pages
 let pagesActiveTab = 'production';
@@ -318,6 +321,87 @@ function getPagesFormValues() {
     };
 }
 
+// ==================== Android 渲染 ====================
+
+function renderAndroidSection() {
+    const content = panelRef?.$['section-content'] as HTMLElement;
+    const btnBar = panelRef?.$['btn-bar'] as HTMLElement;
+    if (!content || !btnBar) return;
+
+    content.innerHTML = `
+        <div style="margin-bottom: 16px;">
+            <div style="color: #569cd6; font-size: 14px; font-weight: bold; margin-bottom: 8px;">📱 Android 多环境打包</div>
+            <div style="font-size: 12px; color: #888; margin-bottom: 16px;">
+                构建完成后，自动为勾选的环境生成独立 APK。<br>
+                每个 APK 包含不同的 env.json 配置文件。
+            </div>
+        </div>
+
+        <div style="border: 1px solid #404040; border-radius: 6px; padding: 14px; background: #252525;">
+            <label class="settings-label" style="margin-bottom: 10px;">选择要构建的环境</label>
+
+            <div class="settings-toggle">
+                <input type="checkbox" id="android-env-dev" ${androidEnvValues.dev ? 'checked' : ''}>
+                <label for="android-env-dev">
+                    <span style="color: #4ec9b0;">dev</span> - 开发环境
+                </label>
+            </div>
+            <div style="font-size: 11px; color: #666; margin-left: 26px; margin-bottom: 8px;">
+                env.json: { "env": "dev" } → app-dev.apk
+            </div>
+
+            <div class="settings-toggle">
+                <input type="checkbox" id="android-env-beta" ${androidEnvValues.beta ? 'checked' : ''}>
+                <label for="android-env-beta">
+                    <span style="color: #ce9178;">beta</span> - 测试环境
+                </label>
+            </div>
+            <div style="font-size: 11px; color: #666; margin-left: 26px; margin-bottom: 8px;">
+                env.json: { "env": "beta" } → app-beta.apk
+            </div>
+
+            <div class="settings-toggle">
+                <input type="checkbox" id="android-env-prod" ${androidEnvValues.prod ? 'checked' : ''}>
+                <label for="android-env-prod">
+                    <span style="color: #569cd6;">prod</span> - 正式环境
+                </label>
+            </div>
+            <div style="font-size: 11px; color: #666; margin-left: 26px;">
+                env.json: { "env": "prod" } → app-prod.apk
+            </div>
+        </div>
+
+        <div style="margin-top: 16px; padding: 12px; background: #1a2332; border: 1px solid #1e3a5f; border-radius: 6px;">
+            <div style="font-size: 12px; color: #569cd6; margin-bottom: 6px;">💡 产出目录</div>
+            <div style="font-size: 11px; color: #9cdcfe; font-family: 'Courier New', monospace;">
+                build_upload_assets/android/app/{version}/<br>
+                ├── app-dev.apk<br>
+                ├── app-beta.apk<br>
+                ├── app-prod.apk<br>
+                └── manifest.json
+            </div>
+        </div>
+    `;
+
+    btnBar.innerHTML = `
+        <button id="btn-android-save" class="settings-btn-primary">保存</button>
+    `;
+
+    // 保存按钮
+    btnBar.querySelector('#btn-android-save')?.addEventListener('click', () => {
+        androidEnvValues = {
+            dev: (content.querySelector('#android-env-dev') as HTMLInputElement)?.checked ?? true,
+            beta: (content.querySelector('#android-env-beta') as HTMLInputElement)?.checked ?? true,
+            prod: (content.querySelector('#android-env-prod') as HTMLInputElement)?.checked ?? true,
+        };
+        const config = { environments: { ...androidEnvValues } };
+        Editor.Message.send('framework-plugin', 'save-android-config', JSON.stringify(config));
+    });
+
+    // 加载现有配置
+    Editor.Message.send('framework-plugin', 'load-settings-android', '');
+}
+
 // ==================== 公共 ====================
 
 function setStatus(text: string, color: string) {
@@ -328,7 +412,7 @@ function setStatus(text: string, color: string) {
     }
 }
 
-function switchSection(section: 'r2' | 'pages') {
+function switchSection(section: 'r2' | 'pages' | 'android') {
     activeSection = section;
     setStatus('', '#888');
 
@@ -340,8 +424,10 @@ function switchSection(section: 'r2' | 'pages') {
 
     if (section === 'r2') {
         renderR2Section();
-    } else {
+    } else if (section === 'pages') {
         renderPagesSection();
+    } else if (section === 'android') {
+        renderAndroidSection();
     }
 }
 
@@ -361,11 +447,12 @@ export function ready(this: any) {
     tabsEl.innerHTML = `
         <button class="section-tab active" data-section="r2">☁️ R2 存储</button>
         <button class="section-tab" data-section="pages">📄 Pages 部署</button>
+        <button class="section-tab" data-section="android">📱 Android</button>
     `;
 
     tabsEl.querySelectorAll('.section-tab').forEach((btn: Element) => {
         btn.addEventListener('click', () => {
-            const section = btn.getAttribute('data-section') as 'r2' | 'pages';
+            const section = btn.getAttribute('data-section') as 'r2' | 'pages' | 'android';
             switchSection(section);
         });
     });
@@ -382,6 +469,7 @@ export function close() {
     pagesEnvValues.production = { projectName: '', domain: '' };
     pagesEnvValues.staging = { projectName: '', domain: '' };
     pagesEnvValues.dev = { projectName: '', domain: '' };
+    androidEnvValues = { dev: true, beta: true, prod: true };
 }
 
 // ==================== 面板方法（接收消息） ====================
@@ -460,6 +548,38 @@ export const methods = {
 
     /** 设置 Pages 状态 */
     setPagesStatus(dataStr: string) {
+        try {
+            const { text, color } = JSON.parse(dataStr);
+            setStatus(text, color);
+        } catch {}
+    },
+
+    /** 加载 Android 配置到表单 */
+    loadAndroidConfig(configStr: string) {
+        if (activeSection !== 'android') return;
+        const content = panelRef?.$['section-content'] as HTMLElement;
+        if (!content) return;
+        try {
+            const config = JSON.parse(configStr);
+            androidEnvValues = {
+                dev: config.environments?.dev !== false,
+                beta: config.environments?.beta !== false,
+                prod: config.environments?.prod !== false,
+            };
+            const setChecked = (id: string, val: boolean) => {
+                const el = content.querySelector(`#${id}`) as HTMLInputElement;
+                if (el) el.checked = val;
+            };
+            setChecked('android-env-dev', androidEnvValues.dev);
+            setChecked('android-env-beta', androidEnvValues.beta);
+            setChecked('android-env-prod', androidEnvValues.prod);
+        } catch (e) {
+            console.error('[Settings] 加载 Android 配置失败', e);
+        }
+    },
+
+    /** 设置 Android 状态 */
+    setAndroidStatus(dataStr: string) {
         try {
             const { text, color } = JSON.parse(dataStr);
             setStatus(text, color);

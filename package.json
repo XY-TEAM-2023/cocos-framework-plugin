@@ -568,6 +568,26 @@
         "methods": [
           "bundle-versions.applyLatestResult"
         ]
+      },
+      "load-settings-android": {
+        "methods": [
+          "loadSettingsAndroid"
+        ]
+      },
+      "save-android-config": {
+        "methods": [
+          "saveAndroidConfigFromPanel"
+        ]
+      },
+      "load-settings-android-config": {
+        "methods": [
+          "settings.loadAndroidConfig"
+        ]
+      },
+      "set-settings-android-status": {
+        "methods": [
+          "settings.setAndroidStatus"
+        ]
       }
     }
   },

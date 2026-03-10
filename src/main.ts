@@ -15,6 +15,7 @@ import {
     listDeployments, rollbackDeployment, deleteDeployment, testPagesConnection,
     PagesConfig, PagesEnvironment, PagesDeployment,
 } from './pages';
+import { loadAndroidConfig, saveAndroidConfig, AndroidConfig } from './android';
 
 // ==================== Git 工具函数 ====================
 
@@ -726,6 +727,36 @@ export const methods: { [key: string]: (...args: any) => any } = {
             setTimeout(() => {
                 Editor.Message.send('framework-plugin', 'load-settings-pages-config', JSON.stringify(existing));
             }, 100);
+        }
+    },
+
+    /**
+     * 设置面板请求加载 Android 配置
+     */
+    async loadSettingsAndroid() {
+        const projectRoot = getProjectPath();
+        const existing = loadAndroidConfig(projectRoot);
+        // 即使没有配置文件也发送默认值（三个环境全部启用）
+        const config = existing || { environments: { dev: true, beta: true, prod: true } };
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'load-settings-android-config', JSON.stringify(config));
+        }, 100);
+    },
+
+    /**
+     * 保存 Android 配置（由设置面板触发）
+     */
+    async saveAndroidConfigFromPanel(configStr: string) {
+        const projectRoot = getProjectPath();
+        try {
+            const config: AndroidConfig = JSON.parse(configStr);
+            saveAndroidConfig(projectRoot, config);
+            const msg = JSON.stringify({ text: '✅ 配置已保存', color: '#4ec9b0' });
+            Editor.Message.send('framework-plugin', 'set-settings-android-status', msg);
+            console.log('[Android] 配置已保存到 .androidconfig.json');
+        } catch {
+            const msg = JSON.stringify({ text: '❌ 保存失败', color: '#f44747' });
+            Editor.Message.send('framework-plugin', 'set-settings-android-status', msg);
         }
     },
 
