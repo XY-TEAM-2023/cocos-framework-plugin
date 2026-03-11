@@ -49,10 +49,6 @@ function getPluginPath(): string {
     return path.join(getProjectPath(), 'extensions', 'framework-plugin');
 }
 
-function isDevProject(): boolean {
-    return path.basename(getProjectPath()) === 'cocos-framework-dev';
-}
-
 function frameworkExists(): boolean {
     return fs.existsSync(path.join(getFrameworkPath(), '.git'));
 }
@@ -381,11 +377,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 推送框架版本（仅 dev 项目）
      */
     async publishFramework() {
-        if (!isDevProject()) {
-            Editor.Dialog.warn('无权限');
-            return;
-        }
-
         await openLog();
         setTitle('推送框架版本');
         await log('========== 推送框架版本 🚀 ==========');
@@ -461,11 +452,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 推送插件版本（仅 dev 项目）
      */
     async publishPlugin() {
-        if (!isDevProject()) {
-            Editor.Dialog.warn('无权限');
-            return;
-        }
-
         await openLog();
         setTitle('推送插件版本');
         await log('========== 推送插件版本 🔧 ==========');
@@ -566,10 +552,9 @@ export const methods: { [key: string]: (...args: any) => any } = {
             await log(`[插件] 路径：${getPluginPath()}`);
 
             await log(`[项目] 路径：${getProjectPath()}`);
-            await log(`[项目] 开发模式：${isDevProject() ? '是（推送功能已启用）' : '否'}`);
 
             const fwVer = frameworkExists() ? await getCurrentVersion(getFrameworkPath()) : '未安装';
-            Editor.Dialog.info(`关于 - 框架管理插件\n\n框架版本：${fwVer}\n插件版本：${pluginVersion}\n开发模式：${isDevProject() ? '是' : '否'}`);
+            Editor.Dialog.info(`关于 - 框架管理插件\n\n框架版本：${fwVer}\n插件版本：${pluginVersion}`);
         } catch (e: any) {
             await log(`获取信息失败：${e.message}`, 'error');
         }
@@ -579,11 +564,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
      * 构建插件（仅 dev 项目）
      */
     async buildPlugin() {
-        if (!isDevProject()) {
-            Editor.Dialog.warn('无权限');
-            return;
-        }
-
         await openLog();
         setTitle('构建插件');
         await log('========== 构建插件 🔨 ==========');
@@ -1890,9 +1870,6 @@ export const methods: { [key: string]: (...args: any) => any } = {
 
 export const load = function () {
     console.log('[框架管理] 插件已加载');
-    if (isDevProject()) {
-        console.log('[框架管理] 当前为开发项目，已启用推送功能');
-    }
     // 显示 R2 自动询问状态
     const config = loadR2Config(getProjectPath());
     if (config?.autoPromptAfterBuild) {
