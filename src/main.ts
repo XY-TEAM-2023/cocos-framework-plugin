@@ -16,6 +16,12 @@ import {
     PagesConfig, PagesEnvironment, PagesDeployment,
 } from './pages';
 import { loadAndroidConfig, saveAndroidConfig, AndroidConfig } from './android';
+import {
+    loadIOSConfig, saveIOSConfig, IOSConfig,
+    copySigningFile, parseMobileProvision,
+    isSigningConfigured, getEnabledIOSEnvironments,
+    generateMultiEnvIpas,
+} from './ios';
 
 // ==================== Git 工具函数 ====================
 
@@ -757,6 +763,240 @@ export const methods: { [key: string]: (...args: any) => any } = {
         } catch {
             const msg = JSON.stringify({ text: '❌ 保存失败', color: '#f44747' });
             Editor.Message.send('framework-plugin', 'set-settings-android-status', msg);
+        }
+    },
+
+    // ==================== iOS 签名 & 构建 ====================
+
+    /**
+     * 打开 iOS 签名配置面板
+     */
+    async openIOSSigning() {
+        Editor.Panel.open('framework-plugin.ios-signing');
+    },
+
+    /**
+     * 打开 iOS 构建面板
+     */
+    async openIOSBuild() {
+        Editor.Panel.open('framework-plugin.ios-build');
+    },
+
+    /**
+     * 选择 mobileprovision 文件（由签名面板触发）
+     */
+    async selectIOSMobileProvision(envKey: string) {
+        const result = await Editor.Dialog.select({
+            title: `选择 ${envKey} 环境的 Provisioning Profile`,
+            filters: [{ name: 'Provisioning Profile', extensions: ['mobileprovision'] }],
+        });
+        if (result.canceled || !result.filePaths?.length) return;
+
+        const sourcePath = result.filePaths[0];
+        const projectRoot = getProjectPath();
+
+        try {
+            // 复制到 .ios-signing/
+            const fileName = copySigningFile(sourcePath, projectRoot, 'mobileprovision');
+            // 解析
+            const signingDir = path.join(projectRoot, '.ios-signing');
+            const info = await parseMobileProvision(path.join(signingDir, fileName));
+
+            // 回传结果时包含 envKey，面板据此更新对应环境的配置
+            Editor.Message.send('framework-plugin', 'set-ios-mobileprovision-result', JSON.stringify({
+                envKey, fileName, ...info,
+            }));
+        } catch (err: any) {
+            console.error('[iOS] 选择 mobileprovision 失败:', err);
+            Editor.Message.send('framework-plugin', 'set-ios-signing-status', JSON.stringify({
+                text: `❌ 解析失败: ${err.message}`, color: '#f44747',
+            }));
+        }
+    },
+
+    /**
+     * 选择 P12 证书文件（由签名面板触发）
+     */
+    async selectIOSP12() {
+        const result = await Editor.Dialog.select({
+            title: '选择 P12 证书',
+            filters: [{ name: 'P12 Certificate', extensions: ['p12', 'pfx'] }],
+        });
+        if (result.canceled || !result.filePaths?.length) return;
+
+        const sourcePath = result.filePaths[0];
+        const projectRoot = getProjectPath();
+
+        try {
+            const fileName = copySigningFile(sourcePath, projectRoot, 'p12');
+            Editor.Message.send('framework-plugin', 'set-ios-p12-result', JSON.stringify({ fileName }));
+        } catch (err: any) {
+            console.error('[iOS] 选择 P12 失败:', err);
+            Editor.Message.send('framework-plugin', 'set-ios-signing-status', JSON.stringify({
+                text: `❌ 复制失败: ${err.message}`, color: '#f44747',
+            }));
+        }
+    },
+
+    /**
+     * 保存 iOS 配置（由签名面板触发）
+     */
+    async saveIOSConfigFromPanel(configStr: string) {
+        const projectRoot = getProjectPath();
+        try {
+            const signingData = JSON.parse(configStr);
+            // 签名面板只传签名相关字段，需要与现有配置合并（保留 enabled 和 exportMethod）
+            const existing = loadIOSConfig(projectRoot);
+            const config: IOSConfig = existing || {
+                shared: { p12File: '', p12Password: '', teamId: '' },
+                environments: {
+                    dev: { enabled: true, exportMethod: 'simulator', mobileprovisionFile: '', profileName: '', profileUUID: '', bundleId: '' },
+                    beta: { enabled: false, exportMethod: 'ad-hoc', mobileprovisionFile: '', profileName: '', profileUUID: '', bundleId: '' },
+                    prod: { enabled: false, exportMethod: 'app-store', mobileprovisionFile: '', profileName: '', profileUUID: '', bundleId: '' },
+                },
+            };
+
+            // 更新共享配置
+            config.shared = signingData.shared || config.shared;
+
+            // 更新各环境的签名信息（保留 enabled 和 exportMethod）
+            for (const envKey of ['dev', 'beta', 'prod'] as const) {
+                const envSigning = signingData.environments?.[envKey];
+                if (envSigning) {
+                    config.environments[envKey].mobileprovisionFile = envSigning.mobileprovisionFile || '';
+                    config.environments[envKey].profileName = envSigning.profileName || '';
+                    config.environments[envKey].profileUUID = envSigning.profileUUID || '';
+                    config.environments[envKey].bundleId = envSigning.bundleId || '';
+                }
+            }
+
+            saveIOSConfig(projectRoot, config);
+            const msg = JSON.stringify({ text: '✅ 配置已保存', color: '#4ec9b0' });
+            Editor.Message.send('framework-plugin', 'set-ios-signing-status', msg);
+            console.log('[iOS] 签名配置已保存到 .iosconfig.json');
+        } catch {
+            const msg = JSON.stringify({ text: '❌ 保存失败', color: '#f44747' });
+            Editor.Message.send('framework-plugin', 'set-ios-signing-status', msg);
+        }
+    },
+
+    /**
+     * 加载 iOS 签名配置（由签名面板触发）
+     */
+    async loadIOSSigningConfig() {
+        const projectRoot = getProjectPath();
+        const config = loadIOSConfig(projectRoot);
+        if (config) {
+            setTimeout(() => {
+                Editor.Message.send('framework-plugin', 'load-ios-signing-config-data', JSON.stringify(config));
+            }, 100);
+        }
+    },
+
+    /**
+     * 加载 iOS 构建配置（由构建面板触发）
+     */
+    async loadIOSBuildConfig() {
+        const projectRoot = getProjectPath();
+        const config = loadIOSConfig(projectRoot);
+        const hasSharedConfig = config ? !!(config.shared.p12File && config.shared.p12Password && config.shared.teamId) : false;
+        const signingReady = config ? isSigningConfigured(config) : false;
+
+        const data = {
+            signingReady,
+            hasSharedConfig,
+            // 每个环境的完整配置
+            environments: config ? {
+                dev: { enabled: config.environments.dev?.enabled !== false, exportMethod: config.environments.dev?.exportMethod || 'simulator' },
+                beta: { enabled: config.environments.beta?.enabled !== false, exportMethod: config.environments.beta?.exportMethod || 'ad-hoc' },
+                prod: { enabled: config.environments.prod?.enabled !== false, exportMethod: config.environments.prod?.exportMethod || 'app-store' },
+            } : {
+                dev: { enabled: true, exportMethod: 'simulator' },
+                beta: { enabled: false, exportMethod: 'ad-hoc' },
+                prod: { enabled: false, exportMethod: 'app-store' },
+            },
+        };
+        setTimeout(() => {
+            Editor.Message.send('framework-plugin', 'load-ios-build-config-data', JSON.stringify(data));
+        }, 100);
+    },
+
+    /**
+     * 开始 iOS 多环境构建（由构建面板触发）
+     */
+    async startIOSBuild(optionsStr: string) {
+        const projectRoot = getProjectPath();
+
+        try {
+            const options = JSON.parse(optionsStr);
+            const environments = options.environments || ['dev', 'beta', 'prod'];
+            const exportMethods: Record<string, string> = options.exportMethods || {};
+
+            // 将构建面板选择的导出方式写入配置（持久化）
+            const config = loadIOSConfig(projectRoot);
+            if (config) {
+                for (const envKey of environments) {
+                    if (exportMethods[envKey] && config.environments[envKey as keyof typeof config.environments]) {
+                        (config.environments as any)[envKey].exportMethod = exportMethods[envKey];
+                        (config.environments as any)[envKey].enabled = true;
+                    }
+                }
+                // 未勾选的环境标记为未启用
+                for (const envKey of ['dev', 'beta', 'prod']) {
+                    if (!environments.includes(envKey)) {
+                        (config.environments as any)[envKey].enabled = false;
+                    }
+                }
+                saveIOSConfig(projectRoot, config);
+            }
+
+            // 通知面板构建开始
+            Editor.Message.send('framework-plugin', 'set-ios-build-started');
+
+            // 生成版本号
+            const now = new Date();
+            const version = [
+                String(now.getFullYear()).slice(2),
+                String(now.getMonth() + 1).padStart(2, '0'),
+                String(now.getDate()).padStart(2, '0'),
+                String(now.getHours()).padStart(2, '0'),
+                String(now.getMinutes()).padStart(2, '0'),
+                String(now.getSeconds()).padStart(2, '0'),
+            ].join('');
+
+            const logFn = (message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') => {
+                console.log(`[iOS] ${message}`);
+                try {
+                    Editor.Message.send('framework-plugin', 'append-ios-build-log', JSON.stringify({
+                        message, type, time: new Date().toLocaleTimeString(),
+                    }));
+                } catch {}
+            };
+
+            const results = await generateMultiEnvIpas({
+                projectRoot,
+                version,
+                environments,
+                onLog: logFn,
+            });
+
+            const successCount = results.filter(r => r.success).length;
+            logFn(
+                `多环境 IPA 构建完成: ${successCount}/${environments.length} 成功`,
+                successCount === environments.length ? 'success' : 'warn'
+            );
+
+            // 通知面板构建完成
+            Editor.Message.send('framework-plugin', 'set-ios-build-complete', JSON.stringify({ results }));
+
+        } catch (err: any) {
+            console.error('[iOS] 构建出错:', err);
+            try {
+                Editor.Message.send('framework-plugin', 'append-ios-build-log', JSON.stringify({
+                    message: `构建出错: ${err.message}`, type: 'error', time: new Date().toLocaleTimeString(),
+                }));
+                Editor.Message.send('framework-plugin', 'set-ios-build-complete', JSON.stringify({ error: err.message }));
+            } catch {}
         }
     },
 

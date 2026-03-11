@@ -137,6 +137,34 @@
       "flags": {
         "alwaysOnTop": true
       }
+    },
+    "ios-signing": {
+      "title": "iOS 签名配置",
+      "type": "simple",
+      "main": "dist/panels/ios-signing",
+      "size": {
+        "min-width": 420,
+        "min-height": 450,
+        "width": 500,
+        "height": 600
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
+    },
+    "ios-build": {
+      "title": "iOS 构建",
+      "type": "simple",
+      "main": "dist/panels/ios-build",
+      "size": {
+        "min-width": 550,
+        "min-height": 500,
+        "width": 650,
+        "height": 700
+      },
+      "flags": {
+        "alwaysOnTop": true
+      }
     }
   },
   "contributions": {
@@ -181,6 +209,16 @@
         "path": "框架/框架",
         "label": "修复",
         "message": "repair-framework"
+      },
+      {
+        "path": "框架/iOS",
+        "label": "配置签名",
+        "message": "open-ios-signing"
+      },
+      {
+        "path": "框架/iOS",
+        "label": "构建",
+        "message": "open-ios-build"
       },
       {
         "path": "框架/开发",
@@ -587,6 +625,86 @@
       "set-settings-android-status": {
         "methods": [
           "settings.setAndroidStatus"
+        ]
+      },
+      "open-ios-signing": {
+        "methods": [
+          "openIOSSigning"
+        ]
+      },
+      "open-ios-build": {
+        "methods": [
+          "openIOSBuild"
+        ]
+      },
+      "select-ios-mobileprovision": {
+        "methods": [
+          "selectIOSMobileProvision"
+        ]
+      },
+      "set-ios-mobileprovision-result": {
+        "methods": [
+          "ios-signing.setMobileProvisionResult"
+        ]
+      },
+      "select-ios-p12": {
+        "methods": [
+          "selectIOSP12"
+        ]
+      },
+      "set-ios-p12-result": {
+        "methods": [
+          "ios-signing.setP12Result"
+        ]
+      },
+      "save-ios-config": {
+        "methods": [
+          "saveIOSConfigFromPanel"
+        ]
+      },
+      "set-ios-signing-status": {
+        "methods": [
+          "ios-signing.setStatus"
+        ]
+      },
+      "load-ios-signing-config": {
+        "methods": [
+          "loadIOSSigningConfig"
+        ]
+      },
+      "load-ios-signing-config-data": {
+        "methods": [
+          "ios-signing.loadConfig"
+        ]
+      },
+      "start-ios-build": {
+        "methods": [
+          "startIOSBuild"
+        ]
+      },
+      "load-ios-build-config": {
+        "methods": [
+          "loadIOSBuildConfig"
+        ]
+      },
+      "load-ios-build-config-data": {
+        "methods": [
+          "ios-build.loadConfig"
+        ]
+      },
+      "append-ios-build-log": {
+        "methods": [
+          "ios-build.appendLog"
+        ]
+      },
+      "set-ios-build-started": {
+        "methods": [
+          "ios-build.setBuildStarted"
+        ]
+      },
+      "set-ios-build-complete": {
+        "methods": [
+          "ios-build.setBuildComplete"
         ]
       }
     }

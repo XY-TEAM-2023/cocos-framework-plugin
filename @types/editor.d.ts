@@ -22,6 +22,8 @@ declare namespace Editor {
         function info(message: string, options?: DialogOptions): Promise<DialogResult>;
         function warn(message: string, options?: DialogOptions): Promise<DialogResult>;
         function error(message: string, options?: DialogOptions): Promise<DialogResult>;
+        function select(options?: SelectDialogOptions): Promise<OpenDialogReturnValue>;
+        function save(options?: SaveDialogOptions): Promise<SaveDialogReturnValue>;
     }
 
     interface DialogOptions {
@@ -34,5 +36,29 @@ declare namespace Editor {
 
     interface DialogResult {
         response: number;
+    }
+
+    interface SelectDialogOptions {
+        title?: string;
+        path?: string;
+        type?: 'directory' | 'file';
+        multi?: boolean;
+        filters?: Array<{ name: string; extensions: string[] }>;
+    }
+
+    interface OpenDialogReturnValue {
+        canceled: boolean;
+        filePaths: string[];
+    }
+
+    interface SaveDialogOptions {
+        title?: string;
+        path?: string;
+        filters?: Array<{ name: string; extensions: string[] }>;
+    }
+
+    interface SaveDialogReturnValue {
+        canceled: boolean;
+        filePath?: string;
     }
 }
