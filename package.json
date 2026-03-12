@@ -165,6 +165,17 @@
       "flags": {
         "alwaysOnTop": true
       }
+    },
+    "i18n": {
+      "title": "国际化资源管理",
+      "type": "simple",
+      "main": "dist/panels/i18n",
+      "size": {
+        "min-width": 900,
+        "min-height": 600,
+        "width": 1100,
+        "height": 760
+      }
     }
   },
   "contributions": {
@@ -219,6 +230,11 @@
         "path": "框架/iOS",
         "label": "构建",
         "message": "open-ios-build"
+      },
+      {
+        "path": "框架",
+        "label": "国际化资源管理",
+        "message": "open-i18n-editor"
       },
       {
         "path": "框架/开发",
@@ -706,6 +722,42 @@
         "methods": [
           "ios-build.setBuildComplete"
         ]
+      },
+      "open-i18n-editor": {
+        "methods": ["openI18nEditor"]
+      },
+      "i18n-load-data": {
+        "methods": ["loadI18nData"]
+      },
+      "i18n-create-namespace": {
+        "methods": ["createI18nNamespace"]
+      },
+      "i18n-delete-namespace": {
+        "methods": ["deleteI18nNamespace"]
+      },
+      "i18n-rename-namespace": {
+        "methods": ["renameI18nNamespace"]
+      },
+      "i18n-create-key": {
+        "methods": ["createI18nKey"]
+      },
+      "i18n-delete-key": {
+        "methods": ["deleteI18nKey"]
+      },
+      "i18n-save-translations": {
+        "methods": ["saveI18nKeyTranslations"]
+      },
+      "i18n-add-language": {
+        "methods": ["addI18nLanguage"]
+      },
+      "i18n-remove-language": {
+        "methods": ["removeI18nLanguage"]
+      },
+      "set-i18n-data": {
+        "methods": ["i18n.setI18nData"]
+      },
+      "set-i18n-status": {
+        "methods": ["i18n.setStatus"]
       }
     }
   },

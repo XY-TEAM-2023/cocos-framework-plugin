@@ -31,6 +31,86 @@ const r2_1 = require("./r2");
 const pages_1 = require("./pages");
 const android_1 = require("./android");
 const ios_1 = require("./ios");
+/** 当前加载的 i18n 数据源列表 */
+let i18nSources = [];
+/** 扫描所有 i18n JSON 文件 */
+function scanI18nSources() {
+    const projectPath = getProjectPath();
+    const result = [];
+    // 1. 平台级 i18n
+    const platformPath = path.join(projectPath, 'assets/framework/resources/i18n/platform.json');
+    if (fs.existsSync(platformPath)) {
+        try {
+            const data = JSON.parse(fs.readFileSync(platformPath, 'utf8'));
+            result.push({ name: '平台 (platform)', filePath: platformPath, data });
+        }
+        catch (e) {
+            console.warn('[i18n] 解析 platform.json 失败:', e);
+        }
+    }
+    // 2. 各游戏 Bundle 的 i18n
+    const gamesDir = path.join(projectPath, 'assets/games');
+    if (fs.existsSync(gamesDir)) {
+        const dirs = fs.readdirSync(gamesDir, { withFileTypes: true });
+        for (const dir of dirs) {
+            if (!dir.isDirectory())
+                continue;
+            const i18nPath = path.join(gamesDir, dir.name, 'i18n/i18n.json');
+            if (fs.existsSync(i18nPath)) {
+                try {
+                    const data = JSON.parse(fs.readFileSync(i18nPath, 'utf8'));
+                    result.push({ name: dir.name, filePath: i18nPath, data });
+                }
+                catch (e) {
+                    console.warn(`[i18n] 解析 ${dir.name}/i18n/i18n.json 失败:`, e);
+                }
+            }
+        }
+    }
+    return result;
+}
+/** 从所有数据源提取支持的语言列表 */
+function extractI18nLanguages(sources) {
+    const langSet = new Set();
+    for (const source of sources) {
+        for (const ns of Object.values(source.data)) {
+            for (const translations of Object.values(ns)) {
+                for (const lang of Object.keys(translations)) {
+                    langSet.add(lang);
+                }
+            }
+        }
+    }
+    return Array.from(langSet).sort();
+}
+/** 保存单个 i18n 源的数据到文件 */
+function saveI18nSource(source) {
+    const dir = path.dirname(source.filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(source.filePath, JSON.stringify(source.data, null, 4), 'utf8');
+}
+/** 发送 i18n 数据到面板 */
+function sendI18nDataToPanel() {
+    const languages = extractI18nLanguages(i18nSources);
+    const payload = JSON.stringify({
+        sources: i18nSources.map(s => ({
+            name: s.name,
+            filePath: s.filePath,
+            namespaces: Object.keys(s.data),
+        })),
+        languages,
+        fullData: i18nSources.map(s => ({
+            name: s.name,
+            data: s.data,
+        })),
+    });
+    Editor.Message.send('framework-plugin', 'set-i18n-data', payload);
+}
+function sendI18nStatus(text, color = '#888') {
+    Editor.Message.send('framework-plugin', 'set-i18n-status', JSON.stringify({ text, color }));
+}
 // ==================== Git 工具函数 ====================
 function runCommand(cmd, cwd) {
     return new Promise((resolve, reject) => {
@@ -1710,6 +1790,168 @@ exports.methods = {
             Editor.Message.send('framework-plugin', 'apply-latest-result', JSON.stringify({
                 success: false, message: e.message,
             }));
+        }
+    },
+    // ==================== I18n 管理 ====================
+    /** 打开国际化编辑器面板 */
+    openI18nEditor() {
+        Editor.Panel.open('framework-plugin.i18n');
+        // 延迟发送数据，等面板 ready
+        setTimeout(() => {
+            i18nSources = scanI18nSources();
+            sendI18nDataToPanel();
+        }, 300);
+    },
+    /** 重新加载 i18n 数据 */
+    loadI18nData() {
+        i18nSources = scanI18nSources();
+        sendI18nDataToPanel();
+        sendI18nStatus(`已加载 ${i18nSources.length} 个数据源`, '#4ec9b0');
+    },
+    /** 创建命名空间 */
+    createI18nNamespace(dataStr) {
+        try {
+            const { sourceIndex, namespace } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source)
+                return;
+            if (source.data[namespace]) {
+                sendI18nStatus(`命名空间 "${namespace}" 已存在`, '#ce9178');
+                return;
+            }
+            source.data[namespace] = {};
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已创建命名空间 "${namespace}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] createNamespace 失败:', e);
+        }
+    },
+    /** 删除命名空间 */
+    deleteI18nNamespace(dataStr) {
+        try {
+            const { sourceIndex, namespace } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source)
+                return;
+            delete source.data[namespace];
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已删除命名空间 "${namespace}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] deleteNamespace 失败:', e);
+        }
+    },
+    /** 重命名命名空间 */
+    renameI18nNamespace(dataStr) {
+        try {
+            const { sourceIndex, oldName, newName } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source)
+                return;
+            if (source.data[newName]) {
+                sendI18nStatus(`命名空间 "${newName}" 已存在`, '#ce9178');
+                return;
+            }
+            source.data[newName] = source.data[oldName];
+            delete source.data[oldName];
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已重命名 "${oldName}" → "${newName}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] renameNamespace 失败:', e);
+        }
+    },
+    /** 创建 Key */
+    createI18nKey(dataStr) {
+        try {
+            const { sourceIndex, namespace, key } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source || !source.data[namespace])
+                return;
+            if (source.data[namespace][key]) {
+                sendI18nStatus(`Key "${key}" 已存在`, '#ce9178');
+                return;
+            }
+            source.data[namespace][key] = {};
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已创建 Key "${namespace}.${key}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] createKey 失败:', e);
+        }
+    },
+    /** 删除 Key */
+    deleteI18nKey(dataStr) {
+        try {
+            const { sourceIndex, namespace, key } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source || !source.data[namespace])
+                return;
+            delete source.data[namespace][key];
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已删除 Key "${namespace}.${key}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] deleteKey 失败:', e);
+        }
+    },
+    /** 保存 Key 的翻译内容 */
+    saveI18nKeyTranslations(dataStr) {
+        try {
+            const { sourceIndex, namespace, key, translations } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source || !source.data[namespace])
+                return;
+            source.data[namespace][key] = translations;
+            saveI18nSource(source);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已保存 "${namespace}.${key}" 的翻译`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] saveKeyTranslations 失败:', e);
+        }
+    },
+    /** 添加语言 */
+    addI18nLanguage(dataStr) {
+        try {
+            const { langCode } = JSON.parse(dataStr);
+            sendI18nDataToPanel();
+            sendI18nStatus(`已添加语言 "${langCode}"`, '#4ec9b0');
+        }
+        catch (e) {
+            console.error('[i18n] addLanguage 失败:', e);
+        }
+    },
+    /** 移除语言 */
+    removeI18nLanguage(dataStr) {
+        try {
+            const { langCode } = JSON.parse(dataStr);
+            for (const source of i18nSources) {
+                for (const ns of Object.values(source.data)) {
+                    for (const translations of Object.values(ns)) {
+                        delete translations[langCode];
+                    }
+                }
+                saveI18nSource(source);
+            }
+            sendI18nDataToPanel();
+            sendI18nStatus(`已移除语言 "${langCode}" 的所有翻译`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+        }
+        catch (e) {
+            console.error('[i18n] removeLanguage 失败:', e);
         }
     },
 };
