@@ -41,6 +41,39 @@ interface I18nSource {
 /** 当前加载的 i18n 数据源列表 */
 let i18nSources: I18nSource[] = [];
 
+/** 主语言（回退语言） */
+let i18nPrimaryLang = 'zh';
+
+/** i18n 配置文件路径 */
+function getI18nConfigPath(): string {
+    return path.join(getProjectPath(), 'assets/framework/resources/i18n/i18n-config.json');
+}
+
+/** 加载主语言配置 */
+function loadI18nConfig() {
+    try {
+        const configPath = getI18nConfigPath();
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            if (config.primaryLang) i18nPrimaryLang = config.primaryLang;
+        }
+    } catch (e) {
+        console.warn('[i18n] 加载 i18n 配置失败:', e);
+    }
+}
+
+/** 保存主语言配置 */
+function saveI18nConfig() {
+    try {
+        const configPath = getI18nConfigPath();
+        const dir = path.dirname(configPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(configPath, JSON.stringify({ primaryLang: i18nPrimaryLang }, null, 4), 'utf8');
+    } catch (e) {
+        console.error('[i18n] 保存 i18n 配置失败:', e);
+    }
+}
+
 /** 扫描所有 i18n JSON 文件 */
 function scanI18nSources(): I18nSource[] {
     const projectPath = getProjectPath();
@@ -78,6 +111,32 @@ function scanI18nSources(): I18nSource[] {
     return result;
 }
 
+/**
+ * 列出所有尚未有 i18n 的游戏目录
+ * 返回 { name, targetPath } 数组，targetPath 是将要生成的 i18n.json 完整路径
+ */
+function listGamesWithoutI18n(): { name: string; targetPath: string }[] {
+    const projectPath = getProjectPath();
+    const gamesDir = path.join(projectPath, 'assets/games');
+    const result: { name: string; targetPath: string }[] = [];
+
+    if (!fs.existsSync(gamesDir)) return result;
+
+    const dirs = fs.readdirSync(gamesDir, { withFileTypes: true });
+    for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const i18nPath = path.join(gamesDir, dir.name, 'i18n/i18n.json');
+        if (!fs.existsSync(i18nPath)) {
+            result.push({
+                name: dir.name,
+                targetPath: i18nPath,
+            });
+        }
+    }
+
+    return result;
+}
+
 /** 从所有数据源提取支持的语言列表 */
 function extractI18nLanguages(sources: I18nSource[]): string[] {
     const langSet = new Set<string>();
@@ -93,6 +152,135 @@ function extractI18nLanguages(sources: I18nSource[]): string[] {
     return Array.from(langSet).sort();
 }
 
+/**
+ * 扫描项目中 i18n key 的引用次数
+ *
+ * 扫描策略：
+ * 1. 先从所有 i18n 数据源收集全部已知 key（namespace.key 格式）
+ * 2. 在 .ts 文件中匹配：
+ *    - .t('ns.key') / .t("ns.key") 调用（直接字符串参数）
+ *    - setKey('ns.key') 调用
+ *    - 字符串字面量中出现的已知 key（如 key = 'demo.title'）
+ * 3. 在 .scene / .prefab 文件中匹配：
+ *    - "key": "ns.key" 格式（Cocos @property 序列化字段）
+ *
+ * 调用时机：面板打开/刷新时执行一次，结果缓存
+ */
+function scanI18nKeyReferences(): Record<string, number> {
+    const projectPath = getProjectPath();
+    const assetsDir = path.join(projectPath, 'assets');
+    const refCounts: Record<string, number> = {};
+
+    if (!fs.existsSync(assetsDir)) return refCounts;
+
+    // 先收集所有已知 key，用于字符串字面量匹配
+    const allKnownKeys = new Set<string>();
+    for (const source of i18nSources) {
+        for (const [ns, keys] of Object.entries(source.data)) {
+            for (const key of Object.keys(keys)) {
+                allKnownKeys.add(`${ns}.${key}`);
+            }
+        }
+    }
+    if (allKnownKeys.size === 0) return refCounts;
+
+    // 初始化计数
+    for (const k of allKnownKeys) refCounts[k] = 0;
+
+    // 递归收集文件
+    function collectFiles(dir: string, exts: string[]): string[] {
+        const files: string[] = [];
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'i18n') continue;
+                    files.push(...collectFiles(fullPath, exts));
+                } else if (exts.some(ext => entry.name.endsWith(ext))) {
+                    files.push(fullPath);
+                }
+            }
+        } catch {}
+        return files;
+    }
+
+    // 1. 扫描 .ts 文件
+    const tsFiles = collectFiles(assetsDir, ['.ts']);
+    // 匹配 .t('xxx') / .t("xxx") / .t(`xxx`)
+    const tCallPattern = /\.t\(\s*['"`]([^'"`]+)['"`]/g;
+    // 匹配 setKey('xxx') / setKey("xxx")
+    const setKeyPattern = /setKey\(\s*['"`]([^'"`]+)['"`]/g;
+
+    for (const file of tsFiles) {
+        try {
+            const content = fs.readFileSync(file, 'utf8');
+
+            // 去除注释内容后再匹配（简化：去单行注释和块注释）
+            const cleaned = content
+                .replace(/\/\/.*$/gm, '')       // 单行注释
+                .replace(/\/\*[\s\S]*?\*\//g, ''); // 块注释
+
+            // .t() 调用
+            let match: RegExpExecArray | null;
+            while ((match = tCallPattern.exec(cleaned)) !== null) {
+                const key = match[1];
+                if (allKnownKeys.has(key)) {
+                    refCounts[key] = (refCounts[key] || 0) + 1;
+                }
+            }
+            tCallPattern.lastIndex = 0;
+
+            // setKey() 调用
+            while ((match = setKeyPattern.exec(cleaned)) !== null) {
+                const key = match[1];
+                if (allKnownKeys.has(key)) {
+                    refCounts[key] = (refCounts[key] || 0) + 1;
+                }
+            }
+            setKeyPattern.lastIndex = 0;
+
+            // 字符串字面量中出现的已知 key（如 key: 'demo.title'）
+            // 用更宽泛的匹配：引号内的 ns.key 格式
+            const strLiteralPattern = /['"`](\w+\.\w+)['"`]/g;
+            while ((match = strLiteralPattern.exec(cleaned)) !== null) {
+                const key = match[1];
+                if (allKnownKeys.has(key) && !refCounts[key]) {
+                    // 只在前面 .t() / setKey() 没有匹配到时作为补充
+                    refCounts[key] = (refCounts[key] || 0) + 1;
+                }
+            }
+            strLiteralPattern.lastIndex = 0;
+        } catch {}
+    }
+
+    // 2. 扫描 .scene / .prefab（Cocos 序列化格式）
+    const sceneFiles = collectFiles(assetsDir, ['.scene', '.prefab']);
+    // Cocos 序列化 @property 字段：带引号的 "key" 属性
+    const sceneKeyPattern = /"key"\s*:\s*"([^"]+)"/g;
+    for (const file of sceneFiles) {
+        try {
+            const content = fs.readFileSync(file, 'utf8');
+            let match: RegExpExecArray | null;
+            while ((match = sceneKeyPattern.exec(content)) !== null) {
+                const key = match[1];
+                if (allKnownKeys.has(key)) {
+                    refCounts[key] = (refCounts[key] || 0) + 1;
+                }
+            }
+            sceneKeyPattern.lastIndex = 0;
+        } catch {}
+    }
+
+    return refCounts;
+}
+
+/** 缓存的引用计数 */
+let cachedRefCounts: Record<string, number> = {};
+
+/** 上次扫描时间戳 */
+let lastRefScanTime = 0;
+
 /** 保存单个 i18n 源的数据到文件 */
 function saveI18nSource(source: I18nSource): void {
     const dir = path.dirname(source.filePath);
@@ -105,6 +293,12 @@ function saveI18nSource(source: I18nSource): void {
 /** 发送 i18n 数据到面板 */
 function sendI18nDataToPanel() {
     const languages = extractI18nLanguages(i18nSources);
+    // 刷新引用计数（带耗时统计）
+    const scanStart = Date.now();
+    cachedRefCounts = scanI18nKeyReferences();
+    lastRefScanTime = Date.now();
+    const scanMs = lastRefScanTime - scanStart;
+    console.log(`[i18n] 引用扫描完成，耗时 ${scanMs}ms`);
     const payload = JSON.stringify({
         sources: i18nSources.map(s => ({
             name: s.name,
@@ -112,10 +306,12 @@ function sendI18nDataToPanel() {
             namespaces: Object.keys(s.data),
         })),
         languages,
+        primaryLang: i18nPrimaryLang,
         fullData: i18nSources.map(s => ({
             name: s.name,
             data: s.data,
         })),
+        refCounts: cachedRefCounts,
     });
     Editor.Message.send('framework-plugin', 'set-i18n-data', payload);
 }
@@ -1975,6 +2171,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
         Editor.Panel.open('framework-plugin.i18n');
         // 延迟发送数据，等面板 ready
         setTimeout(() => {
+            loadI18nConfig();
             i18nSources = scanI18nSources();
             sendI18nDataToPanel();
         }, 300);
@@ -1982,6 +2179,7 @@ export const methods: { [key: string]: (...args: any) => any } = {
 
     /** 重新加载 i18n 数据 */
     loadI18nData() {
+        loadI18nConfig();
         i18nSources = scanI18nSources();
         sendI18nDataToPanel();
         sendI18nStatus(`已加载 ${i18nSources.length} 个数据源`, '#4ec9b0');
@@ -2109,8 +2307,20 @@ export const methods: { [key: string]: (...args: any) => any } = {
     addI18nLanguage(dataStr: string) {
         try {
             const { langCode } = JSON.parse(dataStr);
+            // 给所有数据源的所有 key 添加该语言的空条目（确保语言被识别）
+            for (const source of i18nSources) {
+                for (const ns of Object.values(source.data)) {
+                    for (const translations of Object.values(ns)) {
+                        if (!(langCode in translations)) {
+                            translations[langCode] = '';
+                        }
+                    }
+                }
+                saveI18nSource(source);
+            }
             sendI18nDataToPanel();
             sendI18nStatus(`已添加语言 "${langCode}"`, '#4ec9b0');
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
         } catch (e) {
             console.error('[i18n] addLanguage 失败:', e);
         }
@@ -2133,6 +2343,126 @@ export const methods: { [key: string]: (...args: any) => any } = {
             Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
         } catch (e) {
             console.error('[i18n] removeLanguage 失败:', e);
+        }
+    },
+
+    /** 设置主语言 */
+    setI18nPrimaryLang(dataStr: string) {
+        try {
+            const { langCode } = JSON.parse(dataStr);
+            i18nPrimaryLang = langCode;
+            saveI18nConfig();
+            sendI18nDataToPanel();
+            sendI18nStatus(`已将主语言设置为 "${langCode}"`, '#4ec9b0');
+        } catch (e) {
+            console.error('[i18n] setPrimaryLang 失败:', e);
+        }
+    },
+
+    /**
+     * 添加数据源（为游戏 Bundle 创建 i18n.json）
+     * 参数 dataStr: { gameName: string }
+     * 会在 assets/games/{gameName}/i18n/ 下创建空的 i18n.json
+     */
+    addI18nSource(dataStr: string) {
+        try {
+            const { gameName } = JSON.parse(dataStr);
+            const projectPath = getProjectPath();
+            const targetPath = path.join(projectPath, 'assets/games', gameName, 'i18n/i18n.json');
+
+            if (fs.existsSync(targetPath)) {
+                sendI18nStatus(`"${gameName}" 已有 i18n 数据源`, '#ce9178');
+                return;
+            }
+
+            // 确保目录存在
+            const dir = path.dirname(targetPath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+
+            // 创建空的 i18n JSON（带一个默认命名空间）
+            const initData: I18nData = {};
+            fs.writeFileSync(targetPath, JSON.stringify(initData, null, 4), 'utf8');
+
+            // 刷新资产数据库并重新加载
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+
+            // 重新扫描
+            i18nSources = scanI18nSources();
+            sendI18nDataToPanel();
+
+            // 将相对路径显示给用户确认
+            const relativePath = `assets/games/${gameName}/i18n/i18n.json`;
+            sendI18nStatus(`已创建数据源: ${relativePath}`, '#4ec9b0');
+        } catch (e) {
+            console.error('[i18n] addSource 失败:', e);
+        }
+    },
+
+    /**
+     * 移除数据源（删除 i18n.json 文件）
+     * 参数 dataStr: { sourceIndex: number }
+     * 注意：不能移除平台数据源
+     */
+    removeI18nSource(dataStr: string) {
+        try {
+            const { sourceIndex } = JSON.parse(dataStr);
+            const source = i18nSources[sourceIndex];
+            if (!source) return;
+
+            // 禁止删除平台数据源
+            if (source.name === '平台 (platform)') {
+                sendI18nStatus('不能移除平台数据源', '#ce9178');
+                return;
+            }
+
+            // 删除 i18n.json 文件
+            if (fs.existsSync(source.filePath)) {
+                fs.unlinkSync(source.filePath);
+
+                // 如果 i18n 目录为空，也删除该目录
+                const dir = path.dirname(source.filePath);
+                try {
+                    const remaining = fs.readdirSync(dir);
+                    // 只剩 .meta 文件或为空时删除目录
+                    if (remaining.length === 0 || remaining.every(f => f.endsWith('.meta'))) {
+                        for (const f of remaining) {
+                            fs.unlinkSync(path.join(dir, f));
+                        }
+                        fs.rmdirSync(dir);
+                    }
+                } catch {}
+            }
+
+            const removedName = source.name;
+            Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
+
+            // 重新扫描
+            i18nSources = scanI18nSources();
+            sendI18nDataToPanel();
+            sendI18nStatus(`已移除数据源 "${removedName}"`, '#4ec9b0');
+        } catch (e) {
+            console.error('[i18n] removeSource 失败:', e);
+        }
+    },
+
+    /**
+     * 列出所有可添加 i18n 的游戏目录
+     * 返回尚未有 i18n.json 的游戏列表（含将要生成的文件路径）
+     */
+    listAvailableGamesForI18n() {
+        try {
+            const games = listGamesWithoutI18n();
+            const projectPath = getProjectPath();
+            // 转成相对路径方便显示
+            const list = games.map(g => ({
+                name: g.name,
+                relativePath: path.relative(projectPath, g.targetPath).replace(/\\/g, '/'),
+            }));
+            Editor.Message.send('framework-plugin', 'set-i18n-available-games', JSON.stringify(list));
+        } catch (e) {
+            console.error('[i18n] listAvailableGames 失败:', e);
         }
     },
 };

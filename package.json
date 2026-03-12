@@ -753,11 +753,26 @@
       "i18n-remove-language": {
         "methods": ["removeI18nLanguage"]
       },
+      "i18n-set-primary-lang": {
+        "methods": ["setI18nPrimaryLang"]
+      },
+      "i18n-add-source": {
+        "methods": ["addI18nSource"]
+      },
+      "i18n-remove-source": {
+        "methods": ["removeI18nSource"]
+      },
+      "i18n-list-available-games": {
+        "methods": ["listAvailableGamesForI18n"]
+      },
       "set-i18n-data": {
         "methods": ["i18n.setI18nData"]
       },
       "set-i18n-status": {
         "methods": ["i18n.setStatus"]
+      },
+      "set-i18n-available-games": {
+        "methods": ["i18n.setAvailableGames"]
       }
     }
   },

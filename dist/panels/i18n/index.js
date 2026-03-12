@@ -19,10 +19,14 @@ let selectedNamespace = '';
 let selectedKey = '';
 /** Key 列表搜索关键字 */
 let searchKeyword = '';
-/** 当前过滤语言（空 = 全部） */
-let filterLang = '';
 /** 正在重命名的命名空间 */
 let renamingNs = '';
+/** 可添加 i18n 的游戏列表（弹窗使用） */
+let availableGames = [];
+/** 等待自动切换到的数据源名称（添加后跳转） */
+let pendingSwitchSource = '';
+/** 当前编辑 Key 的原始翻译快照（用于脏检测） */
+let originalTranslations = {};
 // ==================== 模板 ====================
 exports.template = `
 <div id="i18n-panel">
@@ -30,11 +34,42 @@ exports.template = `
     <div id="toolbar">
         <div id="toolbar-left">
             <span class="toolbar-title">国际化资源管理</span>
-            <select id="source-selector"></select>
+            <div id="source-group">
+                <select id="source-selector"></select>
+                <button id="btn-add-source" class="source-btn" title="为游戏添加国际化数据源">+</button>
+                <button id="btn-remove-source" class="source-btn danger" title="移除当前数据源">−</button>
+            </div>
         </div>
         <div id="toolbar-right">
-            <button id="btn-reload" class="tool-btn" title="重新加载">↻</button>
-            <button id="btn-add-lang" class="tool-btn" title="添加语言">+ 语言</button>
+            <button id="btn-lang-manage" class="tool-btn" title="语言管理">语言管理</button>
+        </div>
+    </div>
+
+    <!-- 语言管理弹窗 -->
+    <div id="lang-manage-overlay" class="overlay hidden">
+        <div class="overlay-dialog">
+            <div class="dialog-header">
+                <span>语言管理</span>
+                <button id="btn-close-lang-dialog" class="dialog-close">✕</button>
+            </div>
+            <div class="dialog-hint">管理项目中使用的语言，删除语言将清除所有数据源中该语言的翻译内容</div>
+            <div id="lang-list" class="dialog-body"></div>
+            <div class="dialog-footer">
+                <input id="new-lang-input" type="text" placeholder="输入语言代码（如 ko、fr）" class="dialog-input">
+                <button id="btn-add-new-lang" class="dialog-add-btn">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加数据源弹窗 -->
+    <div id="add-source-overlay" class="overlay hidden">
+        <div class="overlay-dialog">
+            <div class="dialog-header">
+                <span>添加国际化数据源</span>
+                <button id="btn-close-dialog" class="dialog-close">✕</button>
+            </div>
+            <div class="dialog-hint">仅支持 assets/games/ 目录下的游戏 Bundle，选择后将自动创建 i18n.json 文件并切换到该数据源</div>
+            <div id="available-games-list" class="dialog-body"></div>
         </div>
     </div>
 
@@ -47,6 +82,10 @@ exports.template = `
                 <button id="btn-add-ns" class="col-header-btn" title="新建命名空间">+</button>
             </div>
             <div id="ns-list" class="col-body"></div>
+            <div id="ns-footer">
+                <button id="btn-rename-ns" class="ns-footer-btn" disabled title="重命名命名空间">✎ 重命名</button>
+                <button id="btn-delete-ns" class="ns-footer-btn danger" disabled title="删除命名空间">✕ 删除</button>
+            </div>
         </div>
 
         <!-- 中栏：Key 列表 -->
@@ -56,20 +95,24 @@ exports.template = `
                 <button id="btn-add-key" class="col-header-btn" title="新建 Key">+</button>
             </div>
             <div id="key-list" class="col-body"></div>
+            <div id="key-list-footer">
+                <button id="btn-rescan-refs" class="key-footer-btn" title="重新扫描项目中的引用次数">↻ 刷新引用统计</button>
+            </div>
         </div>
 
         <!-- 右栏：翻译编辑 -->
         <div id="col-edit">
-            <div class="col-header">
-                <span id="edit-title">选择一个 Key 进行编辑</span>
-                <select id="lang-filter" title="过滤语言">
-                    <option value="">全部语言</option>
-                </select>
+            <div id="edit-header">
+                <span id="edit-key-path">选择一个 Key 进行编辑</span>
+                <button id="btn-copy-key" class="edit-copy-btn hidden" title="复制 Key 路径">复制</button>
             </div>
+            <div id="var-hint-bar" class="hidden"></div>
             <div id="edit-body" class="col-body"></div>
             <div id="edit-actions">
-                <button id="btn-save-key" class="action-btn primary" disabled>保存</button>
                 <button id="btn-delete-key" class="action-btn danger" disabled>删除 Key</button>
+                <div class="actions-spacer"></div>
+                <button id="btn-cancel-key" class="action-btn ghost" disabled>取消</button>
+                <button id="btn-save-key" class="action-btn primary" disabled>保存</button>
             </div>
         </div>
     </div>
@@ -86,6 +129,7 @@ exports.style = `
     display: flex; flex-direction: column; height: 100%;
     background: #0D0D0D; color: #d4d4d4;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px;
+    position: relative;
 }
 
 /* 顶部工具栏 */
@@ -97,15 +141,104 @@ exports.style = `
 #toolbar-left { display: flex; align-items: center; gap: 12px; }
 #toolbar-right { display: flex; align-items: center; gap: 6px; }
 .toolbar-title { font-size: 14px; font-weight: 600; color: #e0e0e0; }
+
+/* 数据源选择器组 */
+#source-group { display: flex; align-items: center; gap: 4px; }
 #source-selector {
     background: #2a2a2a; color: #d4d4d4; border: 1px solid #404040;
     border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none;
 }
+.source-btn {
+    background: #2a2a2a; color: #007ACC; border: 1px solid #404040;
+    border-radius: 4px; width: 26px; height: 26px; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.source-btn:hover { background: #007ACC; color: #fff; border-color: #007ACC; }
+.source-btn.danger { color: #f66; }
+.source-btn.danger:hover { background: #a03030; color: #fff; border-color: #a03030; }
+
 .tool-btn {
     background: #2a2a2a; color: #d4d4d4; border: 1px solid #404040;
     border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
 }
 .tool-btn:hover { background: #3a3a3a; }
+
+/* 添加数据源弹窗 */
+/* 通用弹窗遮罩 */
+.overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+}
+.overlay.hidden { display: none; }
+.overlay-dialog {
+    background: #1e1e1e; border: 1px solid #404040; border-radius: 8px;
+    width: 500px; max-height: 80%; display: flex; flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+/* 语言管理弹窗 */
+.lang-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; border-bottom: 1px solid #1a1a1a;
+}
+.lang-item:hover { background: #252525; }
+.lang-item-info { display: flex; align-items: center; gap: 8px; }
+.lang-item-code { font-size: 14px; color: #d4d4d4; font-weight: 600; }
+.lang-item-badge { font-size: 10px; color: #007ACC; background: #1a2a3a; border-radius: 3px; padding: 1px 6px; }
+.lang-item-actions { display: flex; gap: 6px; }
+.lang-set-primary {
+    background: none; border: 1px solid #2a3a2a; color: #6a6; border-radius: 4px;
+    padding: 2px 8px; font-size: 11px; cursor: pointer;
+}
+.lang-set-primary:hover { background: #1a3a1a; color: #4c4; border-color: #3a5a3a; }
+.lang-item-delete {
+    background: none; border: 1px solid #3a2a2a; color: #a66; border-radius: 4px;
+    padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+.lang-item-delete:hover { background: #3a1a1a; color: #f66; border-color: #5a2a2a; }
+.lang-item-delete:disabled { opacity: 0.3; cursor: not-allowed; }
+.dialog-footer {
+    display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid #2a2a2a;
+}
+.dialog-input {
+    flex: 1; background: #2a2a2a; border: 1px solid #404040; color: #d4d4d4;
+    border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none;
+}
+.dialog-input:focus { border-color: #007ACC; }
+.dialog-add-btn {
+    background: #007ACC; color: #fff; border: none; border-radius: 4px;
+    padding: 6px 16px; font-size: 13px; cursor: pointer;
+}
+.dialog-add-btn:hover { background: #0098ff; }
+.dialog-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid #2a2a2a;
+}
+.dialog-header span { font-size: 15px; font-weight: 600; color: #e0e0e0; }
+.dialog-close {
+    background: none; border: none; color: #666; cursor: pointer; font-size: 16px;
+    width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+}
+.dialog-close:hover { background: #333; color: #fff; }
+.dialog-hint {
+    padding: 10px 18px; font-size: 12px; color: #888; border-bottom: 1px solid #1a1a1a;
+}
+.dialog-body { flex: 1; overflow-y: auto; padding: 8px 0; }
+.game-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; cursor: pointer; transition: background 0.1s;
+}
+.game-item:hover { background: #252525; }
+.game-item-info { display: flex; flex-direction: column; gap: 3px; }
+.game-item-name { font-size: 14px; color: #d4d4d4; font-weight: 500; }
+.game-item-path { font-size: 11px; color: #666; font-family: 'SF Mono', Menlo, monospace; }
+.game-item-btn {
+    background: #007ACC; color: #fff; border: none; border-radius: 4px;
+    padding: 5px 14px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.game-item-btn:hover { background: #0098ff; }
+.dialog-empty { padding: 30px 18px; text-align: center; color: #555; font-size: 13px; }
 
 /* 三栏内容区 */
 #content-area {
@@ -141,19 +274,24 @@ exports.style = `
 .ns-item-name { font-size: 13px; color: #d4d4d4; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ns-item.active .ns-item-name { color: #fff; }
 .ns-item-count { font-size: 11px; color: #555; margin-left: 6px; }
-.ns-item-actions { display: none; gap: 4px; margin-left: 6px; }
-.ns-item:hover .ns-item-actions { display: flex; }
-.ns-item:hover .ns-item-count { display: none; }
-.ns-action-btn {
-    background: none; border: none; color: #666; cursor: pointer;
-    font-size: 12px; padding: 0 3px; line-height: 1;
-}
-.ns-action-btn:hover { color: #007ACC; }
-.ns-action-btn.danger:hover { color: #f44; }
 .ns-rename-input {
     flex: 1; background: #2a2a2a; border: 1px solid #007ACC; color: #d4d4d4;
     border-radius: 3px; padding: 2px 6px; font-size: 12px; outline: none;
 }
+
+/* 命名空间底部操作 */
+#ns-footer {
+    display: flex; gap: 4px; padding: 6px 8px;
+    border-top: 1px solid #2a2a2a; background: #111; flex-shrink: 0;
+}
+.ns-footer-btn {
+    flex: 1; background: #1a1a1a; color: #888; border: 1px solid #2a2a2a;
+    border-radius: 4px; padding: 5px 0; font-size: 11px; cursor: pointer;
+    text-align: center;
+}
+.ns-footer-btn:hover:not(:disabled) { background: #252525; color: #ccc; border-color: #404040; }
+.ns-footer-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.ns-footer-btn.danger:hover:not(:disabled) { color: #f66; border-color: #4a2a2a; }
 
 /* 中栏 - Key 列表 */
 #col-keys {
@@ -172,20 +310,59 @@ exports.style = `
 }
 .key-item:hover { background: #1a1a1a; }
 .key-item.active { background: #1a2a3a; border-left: 3px solid #007ACC; }
-.key-item-name { font-size: 13px; color: #d4d4d4; display: flex; align-items: center; gap: 6px; }
+.key-item-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.key-item-name { font-size: 13px; color: #d4d4d4; display: flex; align-items: center; gap: 6px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .key-item.active .key-item-name { color: #fff; }
-.key-item-name::before { content: '🔑'; font-size: 10px; }
+.key-item-name::before { content: '🔑'; font-size: 10px; flex-shrink: 0; }
 .key-item-preview { font-size: 11px; color: #555; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.key-ref-count { font-size: 11px; color: #4a9; white-space: nowrap; flex-shrink: 0; }
+.key-ref-count.unused { color: #a86; }
+
+/* Key 列表底部 */
+#key-list-footer {
+    padding: 6px 8px; border-top: 1px solid #2a2a2a; background: #111; flex-shrink: 0;
+}
+.key-footer-btn {
+    width: 100%; background: #1a1a1a; color: #888; border: 1px solid #2a2a2a;
+    border-radius: 4px; padding: 5px 0; font-size: 11px; cursor: pointer;
+    text-align: center;
+}
+.key-footer-btn:hover { background: #252525; color: #ccc; border-color: #404040; }
 
 /* 右栏 - 翻译编辑 */
 #col-edit {
     flex: 1; display: flex; flex-direction: column; background: #0D0D0D;
 }
-#edit-title { flex: 1; }
-#lang-filter {
-    background: #2a2a2a; color: #d4d4d4; border: 1px solid #404040;
-    border-radius: 4px; padding: 3px 6px; font-size: 11px; outline: none;
+#edit-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; background: #141414; border-bottom: 1px solid #2a2a2a;
+    min-height: 44px;
 }
+#edit-key-path { font-size: 14px; color: #e0e0e0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-copy-btn {
+    background: none; border: 1px solid #404040; color: #888; border-radius: 4px;
+    padding: 2px 8px; font-size: 11px; cursor: pointer; flex-shrink: 0;
+}
+.edit-copy-btn:hover { background: #252525; color: #ccc; border-color: #555; }
+.edit-copy-btn.hidden { display: none; }
+
+/* 变量提示栏 */
+#var-hint-bar {
+    padding: 6px 16px; background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
+    font-size: 11px; color: #888; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+#var-hint-bar.hidden { display: none; }
+.var-tag {
+    display: inline-block; background: #252535; color: #8888cc; border: 1px solid #3a3a5a;
+    border-radius: 3px; padding: 1px 6px; font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+}
+.var-warn {
+    color: #e8a040; font-size: 11px; margin-left: 8px;
+    display: flex; align-items: center; gap: 4px;
+}
+.var-hint-tip { color: #666; font-style: italic; }
+.var-warn::before { content: '⚠'; }
+
 #edit-body { padding: 16px; }
 .lang-editor {
     margin-bottom: 16px;
@@ -202,10 +379,10 @@ exports.style = `
     background: #1a2a3a; color: #4a9cd6; font-size: 10px; padding: 1px 6px;
     border-radius: 3px;
 }
-.lang-editor-remove {
+.lang-editor-clear {
     background: none; border: none; color: #555; cursor: pointer; font-size: 11px;
 }
-.lang-editor-remove:hover { color: #f44; }
+.lang-editor-clear:hover { color: #aaa; }
 .lang-textarea {
     width: 100%; box-sizing: border-box; min-height: 60px; resize: vertical;
     background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a;
@@ -213,6 +390,10 @@ exports.style = `
     outline: none; line-height: 1.5;
 }
 .lang-textarea:focus { border-color: #007ACC; }
+.lang-missing-hint {
+    margin-top: 4px; padding: 4px 8px; font-size: 11px; color: #e8a040;
+    background: #2a2010; border: 1px solid #3a3020; border-radius: 3px;
+}
 .empty-hint {
     display: flex; align-items: center; justify-content: center;
     height: 100%; color: #444; font-size: 14px; text-align: center;
@@ -220,18 +401,22 @@ exports.style = `
 
 /* 编辑区操作 */
 #edit-actions {
-    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    display: flex; align-items: center; gap: 8px;
     padding: 10px 16px; background: #141414; border-top: 1px solid #2a2a2a;
+    flex-shrink: 0;
 }
+.actions-spacer { flex: 1; }
 .action-btn {
-    border: none; border-radius: 4px; padding: 6px 16px; font-size: 12px;
-    cursor: pointer; color: #d4d4d4;
+    border: none; border-radius: 4px; padding: 5px 12px; font-size: 12px;
+    cursor: pointer; color: #d4d4d4; white-space: nowrap;
 }
-.action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .action-btn.primary { background: #007ACC; color: #fff; }
 .action-btn.primary:hover:not(:disabled) { background: #0098ff; }
 .action-btn.danger { background: #3a1a1a; color: #f66; border: 1px solid #4a2a2a; }
 .action-btn.danger:hover:not(:disabled) { background: #4a2020; }
+.action-btn.ghost { background: transparent; color: #888; border: 1px solid #404040; }
+.action-btn.ghost:hover:not(:disabled) { background: #252525; color: #d4d4d4; }
 
 /* 状态栏 */
 #status-bar {
@@ -248,19 +433,34 @@ exports.style = `
 `;
 exports.$ = {
     'source-selector': '#source-selector',
-    'btn-reload': '#btn-reload',
-    'btn-add-lang': '#btn-add-lang',
+    'btn-add-source': '#btn-add-source',
+    'btn-remove-source': '#btn-remove-source',
+    'btn-lang-manage': '#btn-lang-manage',
+    'lang-manage-overlay': '#lang-manage-overlay',
+    'lang-list': '#lang-list',
+    'new-lang-input': '#new-lang-input',
+    'btn-add-new-lang': '#btn-add-new-lang',
+    'btn-close-lang-dialog': '#btn-close-lang-dialog',
     'btn-add-ns': '#btn-add-ns',
     'ns-list': '#ns-list',
+    'btn-rename-ns': '#btn-rename-ns',
+    'btn-delete-ns': '#btn-delete-ns',
     'key-search': '#key-search',
     'btn-add-key': '#btn-add-key',
     'key-list': '#key-list',
-    'edit-title': '#edit-title',
-    'lang-filter': '#lang-filter',
+    'btn-rescan-refs': '#btn-rescan-refs',
+    'edit-key-path': '#edit-key-path',
+    'btn-copy-key': '#btn-copy-key',
+    'var-hint-bar': '#var-hint-bar',
     'edit-body': '#edit-body',
+    'edit-actions': '#edit-actions',
+    'btn-cancel-key': '#btn-cancel-key',
     'btn-save-key': '#btn-save-key',
     'btn-delete-key': '#btn-delete-key',
     'status-text': '#status-text',
+    'add-source-overlay': '#add-source-overlay',
+    'available-games-list': '#available-games-list',
+    'btn-close-dialog': '#btn-close-dialog',
 };
 // ==================== 渲染 ====================
 /** 获取当前数据源的完整数据 */
@@ -271,18 +471,17 @@ function getSourceData() {
 }
 /** 渲染数据源选择器 */
 function renderSourceSelector() {
+    var _a;
     const sel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['source-selector'];
     if (!sel || !payload)
         return;
     sel.innerHTML = payload.sources.map((s, i) => `<option value="${i}"${i === selectedSourceIndex ? ' selected' : ''}>${s.name}</option>`).join('');
-}
-/** 渲染语言过滤器 */
-function renderLangFilter() {
-    const sel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['lang-filter'];
-    if (!sel || !payload)
-        return;
-    sel.innerHTML = `<option value="">全部语言</option>` +
-        payload.languages.map(l => `<option value="${l}"${l === filterLang ? ' selected' : ''}>${l}</option>`).join('');
+    // 平台数据源不能移除，隐藏 − 按钮
+    const removeBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-remove-source'];
+    if (removeBtn) {
+        const isPlatform = ((_a = payload.sources[selectedSourceIndex]) === null || _a === void 0 ? void 0 : _a.name) === '平台 (platform)';
+        removeBtn.style.display = isPlatform ? 'none' : 'flex';
+    }
 }
 /** 渲染命名空间列表 */
 function renderNamespaces() {
@@ -310,51 +509,26 @@ function renderNamespaces() {
         }
         return `<div class="ns-item${isActive ? ' active' : ''}" data-ns="${esc(ns)}">
             <span class="ns-item-name">${esc(ns)}</span>
-            <span class="ns-item-count">${keyCount}</span>
-            <div class="ns-item-actions">
-                <button class="ns-action-btn" data-action="rename" title="重命名">✎</button>
-                <button class="ns-action-btn danger" data-action="delete" title="删除">✕</button>
-            </div>
+            <span class="ns-item-count">${keyCount} 个键</span>
         </div>`;
     }).join('');
-    // 绑定事件
+    // 绑定点击事件
     list.querySelectorAll('.ns-item').forEach((el) => {
-        var _a, _b;
         const ns = el.getAttribute('data-ns');
-        // 点击选中
         el.addEventListener('click', (e) => {
             const target = e.target;
-            if (target.classList.contains('ns-action-btn') || target.classList.contains('ns-rename-input'))
+            if (target.classList.contains('ns-rename-input'))
                 return;
             selectNamespace(ns);
         });
-        // 重命名按钮
-        (_a = el.querySelector('[data-action="rename"]')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', (e) => {
-            e.stopPropagation();
-            renamingNs = ns;
-            renderNamespaces();
-            // 聚焦输入框
-            const input = list.querySelector('.ns-rename-input');
-            if (input) {
-                input.focus();
-                input.select();
-            }
-        });
-        // 删除按钮
-        (_b = el.querySelector('[data-action="delete"]')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (confirm(`确定删除命名空间 "${ns}" 及其所有 Key？`)) {
-                Editor.Message.send('framework-plugin', 'i18n-delete-namespace', JSON.stringify({
-                    sourceIndex: selectedSourceIndex,
-                    namespace: ns,
-                }));
-                if (selectedNamespace === ns) {
-                    selectedNamespace = '';
-                    selectedKey = '';
-                }
-            }
-        });
     });
+    // 更新底部按钮禁用状态
+    const renameBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-rename-ns'];
+    const deleteBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-delete-ns'];
+    if (renameBtn)
+        renameBtn.disabled = !selectedNamespace;
+    if (deleteBtn)
+        deleteBtn.disabled = !selectedNamespace;
     // 重命名输入框事件
     const renameInput = list.querySelector('.ns-rename-input');
     if (renameInput) {
@@ -414,13 +588,23 @@ function renderKeys() {
         list.innerHTML = `<div class="empty-hint">${searchKeyword ? '无匹配结果' : '暂无 Key<br>点击 + 创建'}</div>`;
         return;
     }
+    const refCounts = (payload === null || payload === void 0 ? void 0 : payload.refCounts) || {};
     list.innerHTML = keys.map(key => {
         const isActive = key === selectedKey;
         const translations = nsData[key] || {};
         // 显示第一个有值的翻译作为预览
         const preview = Object.values(translations).find(v => v) || '';
+        // 引用次数：完整 key = namespace.key
+        const fullKey = `${selectedNamespace}.${key}`;
+        const refCount = refCounts[fullKey] || 0;
+        const refText = refCount > 0
+            ? `<span class="key-ref-count" title="被引用 ${refCount} 次">${refCount} 个引用</span>`
+            : `<span class="key-ref-count unused" title="未被引用">0 个引用</span>`;
         return `<div class="key-item${isActive ? ' active' : ''}" data-key="${esc(key)}">
-            <div class="key-item-name">${esc(key)}</div>
+            <div class="key-item-row">
+                <div class="key-item-name">${esc(key)}</div>
+                ${refText}
+            </div>
             <div class="key-item-preview">${esc(preview)}</div>
         </div>`;
     }).join('');
@@ -431,21 +615,62 @@ function renderKeys() {
         });
     });
 }
+/** 检测当前编辑内容是否和原始数据不同 */
+function isDirty() {
+    const current = collectTranslations();
+    for (const lang of Object.keys(current)) {
+        if ((current[lang] || '') !== (originalTranslations[lang] || ''))
+            return true;
+    }
+    for (const lang of Object.keys(originalTranslations)) {
+        if ((current[lang] || '') !== (originalTranslations[lang] || ''))
+            return true;
+    }
+    return false;
+}
+/** 根据脏状态更新取消/保存按钮的显隐 */
+function updateDirtyState() {
+    const cancelBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-cancel-key'];
+    const saveBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-save-key'];
+    if (!cancelBtn || !saveBtn)
+        return;
+    const dirty = isDirty();
+    cancelBtn.style.visibility = dirty ? 'visible' : 'hidden';
+    saveBtn.style.visibility = dirty ? 'visible' : 'hidden';
+}
+/** 提取文本中的 {xxx} 变量占位符 */
+function extractVars(text) {
+    const matches = text.match(/\{(\w+)\}/g);
+    return matches ? [...new Set(matches.map(m => m.slice(1, -1)))] : [];
+}
 /** 渲染翻译编辑区 */
 function renderEditor() {
     var _a;
-    const titleEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-title'];
+    const keyPathEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-key-path'];
+    const copyBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-copy-key'];
+    const varHintBar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['var-hint-bar'];
     const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    const cancelBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-cancel-key'];
     const saveBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-save-key'];
     const deleteBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-delete-key'];
     if (!body)
         return;
     if (!selectedKey || !selectedNamespace) {
-        if (titleEl)
-            titleEl.textContent = '选择一个 Key 进行编辑';
+        if (keyPathEl)
+            keyPathEl.textContent = '选择一个 Key 进行编辑';
+        if (copyBtn)
+            copyBtn.classList.add('hidden');
+        if (varHintBar)
+            varHintBar.classList.add('hidden');
         body.innerHTML = '<div class="empty-hint">← 从左侧选择一个 Key</div>';
-        if (saveBtn)
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.style.visibility = 'hidden';
+        }
+        if (saveBtn) {
             saveBtn.disabled = true;
+            saveBtn.style.visibility = 'hidden';
+        }
         if (deleteBtn)
             deleteBtn.disabled = true;
         return;
@@ -454,39 +679,239 @@ function renderEditor() {
     if (!data)
         return;
     const translations = ((_a = data[selectedNamespace]) === null || _a === void 0 ? void 0 : _a[selectedKey]) || {};
-    if (titleEl)
-        titleEl.textContent = `${selectedNamespace}.${selectedKey}`;
-    if (saveBtn)
-        saveBtn.disabled = false;
+    // 保存原始翻译快照
+    originalTranslations = {};
+    const allLangs = (payload === null || payload === void 0 ? void 0 : payload.languages) || [];
+    for (const lang of allLangs) {
+        originalTranslations[lang] = translations[lang] || '';
+    }
+    const fullKeyPath = `${selectedNamespace}.${selectedKey}`;
+    if (keyPathEl)
+        keyPathEl.textContent = fullKeyPath;
+    if (copyBtn)
+        copyBtn.classList.remove('hidden');
     if (deleteBtn)
         deleteBtn.disabled = false;
-    // 确定要显示的语言
-    let langs = (payload === null || payload === void 0 ? void 0 : payload.languages) || [];
-    if (filterLang) {
-        langs = langs.filter(l => l === filterLang);
+    // 取消/保存初始隐藏（未修改时不显示）
+    if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.style.visibility = 'hidden';
     }
+    if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.style.visibility = 'hidden';
+    }
+    const langs = (payload === null || payload === void 0 ? void 0 : payload.languages) || [];
+    const primaryLang = (payload === null || payload === void 0 ? void 0 : payload.primaryLang) || langs[0] || '';
+    const primaryValue = translations[primaryLang] || '';
     body.innerHTML = langs.map(lang => {
         const value = translations[lang] || '';
+        const isPrimary = lang === primaryLang;
+        // 非主语言且为空时，显示回退提示
+        let missingHint = '';
+        if (!isPrimary && !value) {
+            missingHint = primaryValue
+                ? `<div class="lang-missing-hint">⚠ 未翻译，运行时将回退到主语言（${esc(primaryLang)}）: "${esc(primaryValue)}"</div>`
+                : `<div class="lang-missing-hint">⚠ 未翻译，主语言也无翻译，运行时将显示 Key 本身</div>`;
+        }
+        if (isPrimary && !value) {
+            missingHint = `<div class="lang-missing-hint">⚠ 主语言未定义，其他缺少翻译的语言将无法回退</div>`;
+        }
         return `<div class="lang-editor">
             <div class="lang-editor-header">
                 <span class="lang-editor-label">
                     ${esc(lang)}
-                    ${lang === langs[0] && !filterLang ? '<span class="lang-editor-badge">主语言</span>' : ''}
+                    ${isPrimary ? '<span class="lang-editor-badge">主语言</span>' : ''}
                 </span>
-                <button class="lang-editor-remove" data-lang="${esc(lang)}" title="移除该语言">移除语言</button>
+                <button class="lang-editor-clear" data-lang="${esc(lang)}" title="清空此语言的翻译">清空</button>
             </div>
             <textarea class="lang-textarea" data-lang="${esc(lang)}" placeholder="输入 ${esc(lang)} 翻译...">${esc(value)}</textarea>
+            ${missingHint}
         </div>`;
     }).join('');
     if (langs.length === 0) {
         body.innerHTML = '<div class="empty-hint">暂无语言<br>点击顶部「+ 语言」添加</div>';
     }
-    // 移除语言按钮
-    body.querySelectorAll('.lang-editor-remove').forEach((btn) => {
+    // 变量提示和实时校验
+    updateVarHints();
+    // textarea 输入时实时校验变量 + 脏检测
+    body.querySelectorAll('.lang-textarea').forEach((ta) => {
+        ta.addEventListener('input', () => {
+            updateVarHints();
+            updateDirtyState();
+        });
+    });
+    // 清空按钮
+    body.querySelectorAll('.lang-editor-clear').forEach((btn) => {
         btn.addEventListener('click', () => {
             const lang = btn.getAttribute('data-lang');
-            if (confirm(`确定移除语言 "${lang}" 的所有翻译？此操作不可撤销。`)) {
+            const ta = body.querySelector(`.lang-textarea[data-lang="${lang}"]`);
+            if (ta) {
+                ta.value = '';
+                ta.focus();
+                updateVarHints();
+                updateDirtyState();
+            }
+        });
+    });
+}
+/** 更新变量提示栏：汇总所有语言的变量，检测不一致 */
+function updateVarHints() {
+    const varHintBar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['var-hint-bar'];
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    if (!varHintBar || !body)
+        return;
+    // 收集每个语言当前输入框中的变量
+    const langVarsMap = {};
+    body.querySelectorAll('.lang-textarea').forEach((ta) => {
+        const lang = ta.getAttribute('data-lang');
+        const text = ta.value;
+        langVarsMap[lang] = extractVars(text);
+    });
+    // 汇总所有出现过的变量（以有内容的语言为准）
+    const allVars = new Set();
+    Object.values(langVarsMap).forEach(vars => vars.forEach(v => allVars.add(v)));
+    varHintBar.classList.remove('hidden');
+    if (allVars.size === 0) {
+        varHintBar.innerHTML = '<span class="var-hint-tip">使用 {变量名} 来定义动态内容</span>';
+        return;
+    }
+    // 变量标签
+    let html = '<span>变量：</span>';
+    allVars.forEach(v => { html += `<span class="var-tag">{${esc(v)}}</span>`; });
+    // 检测不一致：如果某个有内容的语言缺少某变量
+    const warnings = [];
+    for (const [lang, vars] of Object.entries(langVarsMap)) {
+        // 跳过空翻译
+        const ta = body.querySelector(`.lang-textarea[data-lang="${lang}"]`);
+        if (!ta || !ta.value.trim())
+            continue;
+        const missing = [...allVars].filter(v => !vars.includes(v));
+        if (missing.length > 0) {
+            warnings.push(`${lang} 缺少 {${missing.join('}, {')}}`);
+        }
+        // 检查这个语言有没有其他语言都没有的变量（可能打错了）
+        const extras = vars.filter(v => {
+            // 检查其他有内容的语言是否都没有此变量
+            let othersHave = false;
+            for (const [otherLang, otherVars] of Object.entries(langVarsMap)) {
+                if (otherLang === lang)
+                    continue;
+                const otherTa = body.querySelector(`.lang-textarea[data-lang="${otherLang}"]`);
+                if (!otherTa || !otherTa.value.trim())
+                    continue;
+                if (otherVars.includes(v)) {
+                    othersHave = true;
+                    break;
+                }
+            }
+            return !othersHave;
+        });
+        if (extras.length > 0 && Object.keys(langVarsMap).length > 1) {
+            warnings.push(`${lang} 独有 {${extras.join('}, {')}}，可能是拼写错误`);
+        }
+    }
+    if (warnings.length > 0) {
+        html += warnings.map(w => `<span class="var-warn">${esc(w)}</span>`).join('');
+    }
+    varHintBar.innerHTML = html;
+}
+/** 渲染添加数据源弹窗中的游戏列表 */
+function renderAvailableGames() {
+    const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['available-games-list'];
+    if (!list)
+        return;
+    if (availableGames.length === 0) {
+        list.innerHTML = '<div class="dialog-empty">所有游戏目录都已配置国际化数据源</div>';
+        return;
+    }
+    list.innerHTML = availableGames.map(game => {
+        return `<div class="game-item" data-game="${esc(game.name)}">
+            <div class="game-item-info">
+                <span class="game-item-name">${esc(game.name)}</span>
+                <span class="game-item-path">${esc(game.relativePath)}</span>
+            </div>
+            <button class="game-item-btn">添加</button>
+        </div>`;
+    }).join('');
+    // 绑定点击
+    list.querySelectorAll('.game-item').forEach((el) => {
+        var _a;
+        const gameName = el.getAttribute('data-game');
+        const game = availableGames.find(g => g.name === gameName);
+        (_a = el.querySelector('.game-item-btn')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
+            if (game && confirm(`将在以下路径创建 i18n 数据文件：\n\n${game.relativePath}\n\n确认添加？`)) {
+                pendingSwitchSource = gameName;
+                Editor.Message.send('framework-plugin', 'i18n-add-source', JSON.stringify({ gameName }));
+                closeAddSourceDialog();
+            }
+        });
+    });
+}
+// ==================== 弹窗控制 ====================
+function openAddSourceDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['add-source-overlay'];
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        Editor.Message.send('framework-plugin', 'i18n-list-available-games', '');
+    }
+}
+function closeAddSourceDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['add-source-overlay'];
+    if (overlay)
+        overlay.classList.add('hidden');
+}
+function openLangManageDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['lang-manage-overlay'];
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        renderLangList();
+    }
+}
+function closeLangManageDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['lang-manage-overlay'];
+    if (overlay)
+        overlay.classList.add('hidden');
+}
+/** 渲染语言管理列表 */
+function renderLangList() {
+    const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['lang-list'];
+    if (!list)
+        return;
+    const langs = (payload === null || payload === void 0 ? void 0 : payload.languages) || [];
+    if (langs.length === 0) {
+        list.innerHTML = '<div class="empty-hint">暂无语言<br>在下方输入语言代码添加</div>';
+        return;
+    }
+    const primaryLang = (payload === null || payload === void 0 ? void 0 : payload.primaryLang) || langs[0] || '';
+    list.innerHTML = langs.map(lang => {
+        const isPrimary = lang === primaryLang;
+        return `<div class="lang-item" data-lang="${esc(lang)}">
+            <div class="lang-item-info">
+                <span class="lang-item-code">${esc(lang)}</span>
+                ${isPrimary ? '<span class="lang-item-badge">主语言</span>' : `<button class="lang-set-primary" data-lang="${esc(lang)}" title="设为主语言">设为主语言</button>`}
+            </div>
+            <div class="lang-item-actions">
+                <button class="lang-item-delete" data-lang="${esc(lang)}"${isPrimary ? ' disabled title="不能删除主语言"' : ' title="删除此语言的所有翻译"'}>删除</button>
+            </div>
+        </div>`;
+    }).join('');
+    // 绑定设为主语言事件
+    list.querySelectorAll('.lang-set-primary').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const lang = btn.getAttribute('data-lang');
+            Editor.Message.send('framework-plugin', 'i18n-set-primary-lang', JSON.stringify({ langCode: lang }));
+            // 刷新弹窗内列表
+            setTimeout(() => renderLangList(), 300);
+        });
+    });
+    // 绑定删除事件
+    list.querySelectorAll('.lang-item-delete').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const lang = btn.getAttribute('data-lang');
+            if (confirm(`确定删除语言 "${lang}" 吗？\n\n将清除所有数据源中该语言的翻译内容，此操作不可撤销！`)) {
                 Editor.Message.send('framework-plugin', 'i18n-remove-language', JSON.stringify({ langCode: lang }));
+                closeLangManageDialog();
             }
         });
     });
@@ -530,7 +955,7 @@ function esc(str) {
 }
 // ==================== 生命周期 ====================
 function ready() {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
     panelRef = this;
     // 数据源切换
     const sourceSel = this.$['source-selector'];
@@ -538,29 +963,132 @@ function ready() {
         selectedSourceIndex = parseInt(sourceSel.value) || 0;
         selectedNamespace = '';
         selectedKey = '';
+        renderSourceSelector(); // 更新 − 按钮显隐
         renderNamespaces();
         renderKeys();
         renderEditor();
     });
-    // 重新加载
-    (_a = this.$['btn-reload']) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
+    // 添加数据源
+    (_a = this.$['btn-add-source']) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
+        openAddSourceDialog();
+    });
+    // 移除数据源
+    (_b = this.$['btn-remove-source']) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => {
+        if (!payload || !payload.sources[selectedSourceIndex])
+            return;
+        const source = payload.sources[selectedSourceIndex];
+        if (source.name === '平台 (platform)') {
+            setStatus('不能移除平台数据源', '#ce9178');
+            return;
+        }
+        if (confirm(`确定移除数据源 "${source.name}" 吗？\n\n将删除文件：${source.filePath}\n\n此操作不可撤销！`)) {
+            Editor.Message.send('framework-plugin', 'i18n-remove-source', JSON.stringify({
+                sourceIndex: selectedSourceIndex,
+            }));
+            selectedSourceIndex = 0;
+            selectedNamespace = '';
+            selectedKey = '';
+        }
+    });
+    // 关闭弹窗
+    (_c = this.$['btn-close-dialog']) === null || _c === void 0 ? void 0 : _c.addEventListener('click', closeAddSourceDialog);
+    (_d = this.$['add-source-overlay']) === null || _d === void 0 ? void 0 : _d.addEventListener('click', (e) => {
+        if (e.target === panelRef.$['add-source-overlay']) {
+            closeAddSourceDialog();
+        }
+    });
+    // 刷新引用统计
+    (_e = this.$['btn-rescan-refs']) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => {
+        setStatus('正在扫描引用...');
         Editor.Message.send('framework-plugin', 'i18n-load-data', '');
     });
-    // 添加语言
-    (_b = this.$['btn-add-lang']) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => {
-        const lang = prompt('请输入语言代码（如 en、ja、ko）：');
-        if (lang === null || lang === void 0 ? void 0 : lang.trim()) {
-            Editor.Message.send('framework-plugin', 'i18n-add-language', JSON.stringify({ langCode: lang.trim() }));
+    // 语言管理
+    (_f = this.$['btn-lang-manage']) === null || _f === void 0 ? void 0 : _f.addEventListener('click', () => {
+        openLangManageDialog();
+    });
+    // 关闭语言管理弹窗
+    (_g = this.$['btn-close-lang-dialog']) === null || _g === void 0 ? void 0 : _g.addEventListener('click', closeLangManageDialog);
+    (_h = this.$['lang-manage-overlay']) === null || _h === void 0 ? void 0 : _h.addEventListener('click', (e) => {
+        if (e.target === panelRef.$['lang-manage-overlay']) {
+            closeLangManageDialog();
+        }
+    });
+    // 添加新语言
+    (_j = this.$['btn-add-new-lang']) === null || _j === void 0 ? void 0 : _j.addEventListener('click', () => {
+        var _a, _b;
+        const input = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['new-lang-input'];
+        const lang = (_a = input === null || input === void 0 ? void 0 : input.value) === null || _a === void 0 ? void 0 : _a.trim();
+        if (!lang)
+            return;
+        if ((_b = payload === null || payload === void 0 ? void 0 : payload.languages) === null || _b === void 0 ? void 0 : _b.includes(lang)) {
+            setStatus(`语言 "${lang}" 已存在`, '#ce9178');
+            return;
+        }
+        Editor.Message.send('framework-plugin', 'i18n-add-language', JSON.stringify({ langCode: lang }));
+        input.value = '';
+        closeLangManageDialog();
+    });
+    // 回车也可添加
+    (_k = this.$['new-lang-input']) === null || _k === void 0 ? void 0 : _k.addEventListener('keydown', (e) => {
+        var _a;
+        if (e.key === 'Enter') {
+            (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-add-new-lang']) === null || _a === void 0 ? void 0 : _a.click();
+        }
+    });
+    // 复制 Key 路径
+    (_l = this.$['btn-copy-key']) === null || _l === void 0 ? void 0 : _l.addEventListener('click', () => {
+        if (selectedNamespace && selectedKey) {
+            const fullPath = `${selectedNamespace}.${selectedKey}`;
+            navigator.clipboard.writeText(fullPath).then(() => {
+                setStatus(`已复制 "${fullPath}"`, '#4ec9b0');
+            }).catch(() => {
+                // fallback
+                const ta = document.createElement('textarea');
+                ta.value = fullPath;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                setStatus(`已复制 "${fullPath}"`, '#4ec9b0');
+            });
         }
     });
     // 添加命名空间
-    (_c = this.$['btn-add-ns']) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => {
+    (_m = this.$['btn-add-ns']) === null || _m === void 0 ? void 0 : _m.addEventListener('click', () => {
         const ns = prompt('请输入命名空间名称：');
         if (ns === null || ns === void 0 ? void 0 : ns.trim()) {
             Editor.Message.send('framework-plugin', 'i18n-create-namespace', JSON.stringify({
                 sourceIndex: selectedSourceIndex,
                 namespace: ns.trim(),
             }));
+        }
+    });
+    // 重命名命名空间（底部按钮）
+    (_o = this.$['btn-rename-ns']) === null || _o === void 0 ? void 0 : _o.addEventListener('click', () => {
+        if (!selectedNamespace)
+            return;
+        renamingNs = selectedNamespace;
+        renderNamespaces();
+        // 聚焦输入框
+        const list = this.$['ns-list'];
+        const input = list === null || list === void 0 ? void 0 : list.querySelector('.ns-rename-input');
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    });
+    // 删除命名空间（底部按钮）
+    (_p = this.$['btn-delete-ns']) === null || _p === void 0 ? void 0 : _p.addEventListener('click', () => {
+        if (!selectedNamespace)
+            return;
+        if (confirm(`确定删除命名空间 "${selectedNamespace}" 及其所有 Key？`)) {
+            const ns = selectedNamespace;
+            Editor.Message.send('framework-plugin', 'i18n-delete-namespace', JSON.stringify({
+                sourceIndex: selectedSourceIndex,
+                namespace: ns,
+            }));
+            selectedNamespace = '';
+            selectedKey = '';
         }
     });
     // 搜索
@@ -570,7 +1098,7 @@ function ready() {
         renderKeys();
     });
     // 添加 Key
-    (_d = this.$['btn-add-key']) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => {
+    (_q = this.$['btn-add-key']) === null || _q === void 0 ? void 0 : _q.addEventListener('click', () => {
         if (!selectedNamespace) {
             setStatus('请先选择命名空间');
             return;
@@ -584,14 +1112,13 @@ function ready() {
             }));
         }
     });
-    // 语言过滤
-    const langFilter = this.$['lang-filter'];
-    langFilter === null || langFilter === void 0 ? void 0 : langFilter.addEventListener('change', () => {
-        filterLang = langFilter.value;
+    // 取消修改（恢复到保存前的数据）
+    (_r = this.$['btn-cancel-key']) === null || _r === void 0 ? void 0 : _r.addEventListener('click', () => {
         renderEditor();
+        setStatus('已取消修改');
     });
     // 保存 Key 翻译
-    (_e = this.$['btn-save-key']) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => {
+    (_s = this.$['btn-save-key']) === null || _s === void 0 ? void 0 : _s.addEventListener('click', () => {
         if (!selectedKey || !selectedNamespace)
             return;
         const translations = collectTranslations();
@@ -603,7 +1130,7 @@ function ready() {
         }));
     });
     // 删除 Key
-    (_f = this.$['btn-delete-key']) === null || _f === void 0 ? void 0 : _f.addEventListener('click', () => {
+    (_t = this.$['btn-delete-key']) === null || _t === void 0 ? void 0 : _t.addEventListener('click', () => {
         if (!selectedKey || !selectedNamespace)
             return;
         if (confirm(`确定删除 Key "${selectedNamespace}.${selectedKey}"？`)) {
@@ -628,8 +1155,10 @@ function close() {
     selectedNamespace = '';
     selectedKey = '';
     searchKeyword = '';
-    filterLang = '';
     renamingNs = '';
+    availableGames = [];
+    pendingSwitchSource = '';
+    originalTranslations = {};
 }
 exports.close = close;
 // ==================== 面板方法（接收消息） ====================
@@ -640,6 +1169,16 @@ exports.methods = {
             payload = JSON.parse(dataStr);
             if (!payload)
                 return;
+            // 如果有待切换的数据源（刚添加的），自动切换过去
+            if (pendingSwitchSource) {
+                const idx = payload.sources.findIndex(s => s.name === pendingSwitchSource);
+                if (idx >= 0) {
+                    selectedSourceIndex = idx;
+                    selectedNamespace = '';
+                    selectedKey = '';
+                }
+                pendingSwitchSource = '';
+            }
             // 保持当前选中状态
             if (selectedSourceIndex >= payload.sources.length) {
                 selectedSourceIndex = 0;
@@ -651,7 +1190,6 @@ exports.methods = {
                 selectedKey = '';
             }
             renderSourceSelector();
-            renderLangFilter();
             renderNamespaces();
             renderKeys();
             renderEditor();
@@ -667,6 +1205,16 @@ exports.methods = {
             setStatus(text, color || '#fff');
         }
         catch (_a) { }
+    },
+    /** 接收可添加 i18n 的游戏列表 */
+    setAvailableGames(dataStr) {
+        try {
+            availableGames = JSON.parse(dataStr);
+            renderAvailableGames();
+        }
+        catch (e) {
+            console.error('[framework-plugin] 解析可用游戏列表失败:', e);
+        }
     },
 };
 //# sourceMappingURL=index.js.map
