@@ -27,6 +27,8 @@ let availableGames = [];
 let pendingSwitchSource = '';
 /** 当前编辑 Key 的原始翻译快照（用于脏检测） */
 let originalTranslations = {};
+/** 是否处于选择模式（从 Inspector 打开，选中 key 后回传） */
+let pickMode = false;
 // ==================== 模板 ====================
 exports.template = `
 <div id="i18n-panel">
@@ -114,6 +116,15 @@ exports.template = `
                 <button id="btn-cancel-key" class="action-btn ghost" disabled>取消</button>
                 <button id="btn-save-key" class="action-btn primary" disabled>保存</button>
             </div>
+        </div>
+    </div>
+
+    <!-- 选择模式操作条（覆盖在底部状态栏上方） -->
+    <div id="pick-mode-bar" class="pick-mode-bar hidden">
+        <span id="pick-mode-hint">🎯 请选择一个 Key</span>
+        <div class="pick-mode-actions">
+            <button id="btn-cancel-pick" class="pick-cancel-btn">取消</button>
+            <button id="btn-confirm-pick" class="pick-confirm-btn" disabled>选择</button>
         </div>
     </div>
 
@@ -418,6 +429,26 @@ exports.style = `
 .action-btn.ghost { background: transparent; color: #888; border: 1px solid #404040; }
 .action-btn.ghost:hover:not(:disabled) { background: #252525; color: #d4d4d4; }
 
+/* 选择模式操作条 */
+.pick-mode-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: #1a3a1a; border-top: 2px solid #4c8;
+    font-size: 13px; color: #8c8;
+}
+.pick-mode-bar.hidden { display: none; }
+.pick-mode-actions { display: flex; gap: 8px; }
+.pick-cancel-btn {
+    background: #333; border: 1px solid #555; color: #ccc;
+    border-radius: 4px; padding: 5px 16px; font-size: 12px; cursor: pointer;
+}
+.pick-cancel-btn:hover { background: #444; }
+.pick-confirm-btn {
+    background: #0e639c; border: none; color: #fff;
+    border-radius: 4px; padding: 5px 20px; font-size: 12px; cursor: pointer; font-weight: 600;
+}
+.pick-confirm-btn:hover:not(:disabled) { background: #1177bb; }
+.pick-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* 状态栏 */
 #status-bar {
     display: flex; align-items: center; padding: 4px 16px; background: #007ACC;
@@ -457,6 +488,10 @@ exports.$ = {
     'btn-cancel-key': '#btn-cancel-key',
     'btn-save-key': '#btn-save-key',
     'btn-delete-key': '#btn-delete-key',
+    'pick-mode-bar': '#pick-mode-bar',
+    'pick-mode-hint': '#pick-mode-hint',
+    'btn-cancel-pick': '#btn-cancel-pick',
+    'btn-confirm-pick': '#btn-confirm-pick',
     'status-text': '#status-text',
     'add-source-overlay': '#add-source-overlay',
     'available-games-list': '#available-games-list',
@@ -839,8 +874,13 @@ function renderAvailableGames() {
         var _a;
         const gameName = el.getAttribute('data-game');
         const game = availableGames.find(g => g.name === gameName);
-        (_a = el.querySelector('.game-item-btn')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
-            if (game && confirm(`将在以下路径创建 i18n 数据文件：\n\n${game.relativePath}\n\n确认添加？`)) {
+        (_a = el.querySelector('.game-item-btn')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', async () => {
+            if (!game)
+                return;
+            const result = await Editor.Dialog.info(`将在以下路径创建 i18n 数据文件：\n\n${game.relativePath}`, {
+                title: '确认添加', buttons: ['确认', '取消'], default: 0, cancel: 1,
+            });
+            if (result.response === 0) {
                 pendingSwitchSource = gameName;
                 Editor.Message.send('framework-plugin', 'i18n-add-source', JSON.stringify({ gameName }));
                 closeAddSourceDialog();
@@ -907,9 +947,12 @@ function renderLangList() {
     });
     // 绑定删除事件
     list.querySelectorAll('.lang-item-delete').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const lang = btn.getAttribute('data-lang');
-            if (confirm(`确定删除语言 "${lang}" 吗？\n\n将清除所有数据源中该语言的翻译内容，此操作不可撤销！`)) {
+            const result = await Editor.Dialog.warn(`确定删除语言 "${lang}" 吗？\n\n将清除所有数据源中该语言的翻译内容，此操作不可撤销！`, {
+                title: '删除语言', buttons: ['删除', '取消'], default: 1, cancel: 1,
+            });
+            if (result.response === 0) {
                 Editor.Message.send('framework-plugin', 'i18n-remove-language', JSON.stringify({ langCode: lang }));
                 closeLangManageDialog();
             }
@@ -927,6 +970,10 @@ function selectNamespace(ns) {
 }
 function selectKey(key) {
     selectedKey = key;
+    // 选择模式：更新提示并启用确认按钮
+    if (pickMode && selectedNamespace) {
+        updatePickModeUI();
+    }
     renderKeys();
     renderEditor();
 }
@@ -942,6 +989,94 @@ function collectTranslations() {
     });
     return result;
 }
+/**
+ * 自动定位到指定的 fullKey（namespace.key）
+ * 会自动切换数据源、选中命名空间和 key，并滚动到可见区域
+ */
+function navigateToKey(fullKey) {
+    var _a;
+    if (!fullKey || !payload)
+        return;
+    const dotIndex = fullKey.indexOf('.');
+    if (dotIndex === -1)
+        return;
+    const ns = fullKey.substring(0, dotIndex);
+    const key = fullKey.substring(dotIndex + 1);
+    // 遍历所有数据源，找到包含此 namespace + key 的数据源
+    for (let i = 0; i < payload.fullData.length; i++) {
+        const sourceData = payload.fullData[i].data;
+        if (((_a = sourceData[ns]) === null || _a === void 0 ? void 0 : _a[key]) !== undefined) {
+            // 切换数据源
+            if (selectedSourceIndex !== i) {
+                selectedSourceIndex = i;
+                renderSourceSelector();
+            }
+            // 选中命名空间
+            selectedNamespace = ns;
+            renderNamespaces();
+            // 选中 key
+            selectedKey = key;
+            renderKeys();
+            renderEditor();
+            // 滚动到可见区域
+            setTimeout(() => {
+                const nsList = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ns-list'];
+                const activeNs = nsList === null || nsList === void 0 ? void 0 : nsList.querySelector('.ns-item.active');
+                activeNs === null || activeNs === void 0 ? void 0 : activeNs.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                const keyList = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['key-list'];
+                const activeKey = keyList === null || keyList === void 0 ? void 0 : keyList.querySelector('.key-item.active');
+                activeKey === null || activeKey === void 0 ? void 0 : activeKey.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 50);
+            return;
+        }
+    }
+    // 没找到精确匹配，尝试只匹配 namespace（可能 key 还不存在）
+    for (let i = 0; i < payload.fullData.length; i++) {
+        const sourceData = payload.fullData[i].data;
+        if (sourceData[ns]) {
+            if (selectedSourceIndex !== i) {
+                selectedSourceIndex = i;
+                renderSourceSelector();
+            }
+            selectedNamespace = ns;
+            selectedKey = '';
+            renderNamespaces();
+            renderKeys();
+            renderEditor();
+            setTimeout(() => {
+                const nsList = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ns-list'];
+                const activeNs = nsList === null || nsList === void 0 ? void 0 : nsList.querySelector('.ns-item.active');
+                activeNs === null || activeNs === void 0 ? void 0 : activeNs.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 50);
+            return;
+        }
+    }
+}
+/** 更新选择模式 UI */
+function updatePickModeUI() {
+    const bar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['pick-mode-bar'];
+    const hint = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['pick-mode-hint'];
+    const confirmBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-confirm-pick'];
+    if (bar) {
+        if (pickMode) {
+            bar.classList.remove('hidden');
+        }
+        else {
+            bar.classList.add('hidden');
+        }
+    }
+    if (pickMode && hint && confirmBtn) {
+        if (selectedNamespace && selectedKey) {
+            const fullKey = `${selectedNamespace}.${selectedKey}`;
+            hint.textContent = `🎯 已选择: ${fullKey}`;
+            confirmBtn.disabled = false;
+        }
+        else {
+            hint.textContent = '🎯 请选择一个 Key';
+            confirmBtn.disabled = true;
+        }
+    }
+}
 function setStatus(text, color = '#fff') {
     const bar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['status-text'];
     if (bar) {
@@ -955,8 +1090,26 @@ function esc(str) {
 }
 // ==================== 生命周期 ====================
 function ready() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
     panelRef = this;
+    // 选择模式：取消（关闭面板）
+    (_a = this.$['btn-cancel-pick']) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
+        pickMode = false;
+        updatePickModeUI();
+        // @ts-ignore
+        Editor.Panel.close('framework-plugin.i18n');
+    });
+    // 选择模式：确认选择
+    (_b = this.$['btn-confirm-pick']) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => {
+        if (!pickMode || !selectedNamespace || !selectedKey)
+            return;
+        const fullKey = `${selectedNamespace}.${selectedKey}`;
+        // @ts-ignore
+        Editor.Message.send('framework-plugin', 'i18n-key-picked', fullKey);
+        pickMode = false;
+        // 关闭面板
+        Editor.Panel.close('framework-plugin.i18n');
+    });
     // 数据源切换
     const sourceSel = this.$['source-selector'];
     sourceSel === null || sourceSel === void 0 ? void 0 : sourceSel.addEventListener('change', () => {
@@ -969,11 +1122,11 @@ function ready() {
         renderEditor();
     });
     // 添加数据源
-    (_a = this.$['btn-add-source']) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
+    (_c = this.$['btn-add-source']) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => {
         openAddSourceDialog();
     });
     // 移除数据源
-    (_b = this.$['btn-remove-source']) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => {
+    (_d = this.$['btn-remove-source']) === null || _d === void 0 ? void 0 : _d.addEventListener('click', async () => {
         if (!payload || !payload.sources[selectedSourceIndex])
             return;
         const source = payload.sources[selectedSourceIndex];
@@ -981,7 +1134,10 @@ function ready() {
             setStatus('不能移除平台数据源', '#ce9178');
             return;
         }
-        if (confirm(`确定移除数据源 "${source.name}" 吗？\n\n将删除文件：${source.filePath}\n\n此操作不可撤销！`)) {
+        const result = await Editor.Dialog.warn(`确定移除数据源 "${source.name}" 吗？\n\n将删除文件：${source.filePath}\n\n此操作不可撤销！`, {
+            title: '移除数据源', buttons: ['删除', '取消'], default: 1, cancel: 1,
+        });
+        if (result.response === 0) {
             Editor.Message.send('framework-plugin', 'i18n-remove-source', JSON.stringify({
                 sourceIndex: selectedSourceIndex,
             }));
@@ -991,30 +1147,30 @@ function ready() {
         }
     });
     // 关闭弹窗
-    (_c = this.$['btn-close-dialog']) === null || _c === void 0 ? void 0 : _c.addEventListener('click', closeAddSourceDialog);
-    (_d = this.$['add-source-overlay']) === null || _d === void 0 ? void 0 : _d.addEventListener('click', (e) => {
+    (_e = this.$['btn-close-dialog']) === null || _e === void 0 ? void 0 : _e.addEventListener('click', closeAddSourceDialog);
+    (_f = this.$['add-source-overlay']) === null || _f === void 0 ? void 0 : _f.addEventListener('click', (e) => {
         if (e.target === panelRef.$['add-source-overlay']) {
             closeAddSourceDialog();
         }
     });
     // 刷新引用统计
-    (_e = this.$['btn-rescan-refs']) === null || _e === void 0 ? void 0 : _e.addEventListener('click', () => {
+    (_g = this.$['btn-rescan-refs']) === null || _g === void 0 ? void 0 : _g.addEventListener('click', () => {
         setStatus('正在扫描引用...');
         Editor.Message.send('framework-plugin', 'i18n-load-data', '');
     });
     // 语言管理
-    (_f = this.$['btn-lang-manage']) === null || _f === void 0 ? void 0 : _f.addEventListener('click', () => {
+    (_h = this.$['btn-lang-manage']) === null || _h === void 0 ? void 0 : _h.addEventListener('click', () => {
         openLangManageDialog();
     });
     // 关闭语言管理弹窗
-    (_g = this.$['btn-close-lang-dialog']) === null || _g === void 0 ? void 0 : _g.addEventListener('click', closeLangManageDialog);
-    (_h = this.$['lang-manage-overlay']) === null || _h === void 0 ? void 0 : _h.addEventListener('click', (e) => {
+    (_j = this.$['btn-close-lang-dialog']) === null || _j === void 0 ? void 0 : _j.addEventListener('click', closeLangManageDialog);
+    (_k = this.$['lang-manage-overlay']) === null || _k === void 0 ? void 0 : _k.addEventListener('click', (e) => {
         if (e.target === panelRef.$['lang-manage-overlay']) {
             closeLangManageDialog();
         }
     });
     // 添加新语言
-    (_j = this.$['btn-add-new-lang']) === null || _j === void 0 ? void 0 : _j.addEventListener('click', () => {
+    (_l = this.$['btn-add-new-lang']) === null || _l === void 0 ? void 0 : _l.addEventListener('click', () => {
         var _a, _b;
         const input = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['new-lang-input'];
         const lang = (_a = input === null || input === void 0 ? void 0 : input.value) === null || _a === void 0 ? void 0 : _a.trim();
@@ -1029,14 +1185,14 @@ function ready() {
         closeLangManageDialog();
     });
     // 回车也可添加
-    (_k = this.$['new-lang-input']) === null || _k === void 0 ? void 0 : _k.addEventListener('keydown', (e) => {
+    (_m = this.$['new-lang-input']) === null || _m === void 0 ? void 0 : _m.addEventListener('keydown', (e) => {
         var _a;
         if (e.key === 'Enter') {
             (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-add-new-lang']) === null || _a === void 0 ? void 0 : _a.click();
         }
     });
     // 复制 Key 路径
-    (_l = this.$['btn-copy-key']) === null || _l === void 0 ? void 0 : _l.addEventListener('click', () => {
+    (_o = this.$['btn-copy-key']) === null || _o === void 0 ? void 0 : _o.addEventListener('click', () => {
         if (selectedNamespace && selectedKey) {
             const fullPath = `${selectedNamespace}.${selectedKey}`;
             navigator.clipboard.writeText(fullPath).then(() => {
@@ -1053,18 +1209,43 @@ function ready() {
             });
         }
     });
-    // 添加命名空间
-    (_m = this.$['btn-add-ns']) === null || _m === void 0 ? void 0 : _m.addEventListener('click', () => {
-        const ns = prompt('请输入命名空间名称：');
-        if (ns === null || ns === void 0 ? void 0 : ns.trim()) {
-            Editor.Message.send('framework-plugin', 'i18n-create-namespace', JSON.stringify({
-                sourceIndex: selectedSourceIndex,
-                namespace: ns.trim(),
-            }));
+    // 添加命名空间（内联输入框）
+    (_p = this.$['btn-add-ns']) === null || _p === void 0 ? void 0 : _p.addEventListener('click', () => {
+        const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ns-list'];
+        if (!list)
+            return;
+        // 在列表顶部插入输入框
+        const existing = list.querySelector('.ns-new-input');
+        if (existing) {
+            existing.focus();
+            return;
         }
+        const row = document.createElement('div');
+        row.className = 'ns-item active';
+        row.innerHTML = '<input class="ns-new-input" type="text" placeholder="输入命名空间名称...">';
+        list.insertBefore(row, list.firstChild);
+        const input = row.querySelector('.ns-new-input');
+        input.focus();
+        const commit = () => {
+            const val = input.value.trim();
+            row.remove();
+            if (val) {
+                Editor.Message.send('framework-plugin', 'i18n-create-namespace', JSON.stringify({
+                    sourceIndex: selectedSourceIndex,
+                    namespace: val,
+                }));
+            }
+        };
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter')
+                commit();
+            if (e.key === 'Escape')
+                row.remove();
+        });
+        input.addEventListener('blur', commit);
     });
     // 重命名命名空间（底部按钮）
-    (_o = this.$['btn-rename-ns']) === null || _o === void 0 ? void 0 : _o.addEventListener('click', () => {
+    (_q = this.$['btn-rename-ns']) === null || _q === void 0 ? void 0 : _q.addEventListener('click', () => {
         if (!selectedNamespace)
             return;
         renamingNs = selectedNamespace;
@@ -1078,10 +1259,16 @@ function ready() {
         }
     });
     // 删除命名空间（底部按钮）
-    (_p = this.$['btn-delete-ns']) === null || _p === void 0 ? void 0 : _p.addEventListener('click', () => {
+    (_r = this.$['btn-delete-ns']) === null || _r === void 0 ? void 0 : _r.addEventListener('click', async () => {
         if (!selectedNamespace)
             return;
-        if (confirm(`确定删除命名空间 "${selectedNamespace}" 及其所有 Key？`)) {
+        const result = await Editor.Dialog.warn(`确定删除命名空间 "${selectedNamespace}" 及其所有 Key？`, {
+            title: '删除命名空间',
+            buttons: ['确定', '取消'],
+            default: 1,
+            cancel: 1,
+        });
+        if (result.response === 0) {
             const ns = selectedNamespace;
             Editor.Message.send('framework-plugin', 'i18n-delete-namespace', JSON.stringify({
                 sourceIndex: selectedSourceIndex,
@@ -1097,28 +1284,52 @@ function ready() {
         searchKeyword = searchInput.value;
         renderKeys();
     });
-    // 添加 Key
-    (_q = this.$['btn-add-key']) === null || _q === void 0 ? void 0 : _q.addEventListener('click', () => {
+    // 添加 Key（内联输入框）
+    (_s = this.$['btn-add-key']) === null || _s === void 0 ? void 0 : _s.addEventListener('click', () => {
         if (!selectedNamespace) {
             setStatus('请先选择命名空间');
             return;
         }
-        const key = prompt(`在 "${selectedNamespace}" 中新建 Key：`);
-        if (key === null || key === void 0 ? void 0 : key.trim()) {
-            Editor.Message.send('framework-plugin', 'i18n-create-key', JSON.stringify({
-                sourceIndex: selectedSourceIndex,
-                namespace: selectedNamespace,
-                key: key.trim(),
-            }));
+        const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['key-list'];
+        if (!list)
+            return;
+        const existing = list.querySelector('.key-new-input');
+        if (existing) {
+            existing.focus();
+            return;
         }
+        const row = document.createElement('div');
+        row.className = 'key-item active';
+        row.innerHTML = '<input class="key-new-input" type="text" placeholder="输入 Key 名称...">';
+        list.insertBefore(row, list.firstChild);
+        const input = row.querySelector('.key-new-input');
+        input.focus();
+        const commit = () => {
+            const val = input.value.trim();
+            row.remove();
+            if (val) {
+                Editor.Message.send('framework-plugin', 'i18n-create-key', JSON.stringify({
+                    sourceIndex: selectedSourceIndex,
+                    namespace: selectedNamespace,
+                    key: val,
+                }));
+            }
+        };
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter')
+                commit();
+            if (e.key === 'Escape')
+                row.remove();
+        });
+        input.addEventListener('blur', commit);
     });
     // 取消修改（恢复到保存前的数据）
-    (_r = this.$['btn-cancel-key']) === null || _r === void 0 ? void 0 : _r.addEventListener('click', () => {
+    (_t = this.$['btn-cancel-key']) === null || _t === void 0 ? void 0 : _t.addEventListener('click', () => {
         renderEditor();
         setStatus('已取消修改');
     });
     // 保存 Key 翻译
-    (_s = this.$['btn-save-key']) === null || _s === void 0 ? void 0 : _s.addEventListener('click', () => {
+    (_u = this.$['btn-save-key']) === null || _u === void 0 ? void 0 : _u.addEventListener('click', () => {
         if (!selectedKey || !selectedNamespace)
             return;
         const translations = collectTranslations();
@@ -1130,10 +1341,16 @@ function ready() {
         }));
     });
     // 删除 Key
-    (_t = this.$['btn-delete-key']) === null || _t === void 0 ? void 0 : _t.addEventListener('click', () => {
+    (_v = this.$['btn-delete-key']) === null || _v === void 0 ? void 0 : _v.addEventListener('click', async () => {
         if (!selectedKey || !selectedNamespace)
             return;
-        if (confirm(`确定删除 Key "${selectedNamespace}.${selectedKey}"？`)) {
+        const result = await Editor.Dialog.warn(`确定删除 Key "${selectedNamespace}.${selectedKey}"？`, {
+            title: '删除 Key',
+            buttons: ['确定', '取消'],
+            default: 1,
+            cancel: 1,
+        });
+        if (result.response === 0) {
             Editor.Message.send('framework-plugin', 'i18n-delete-key', JSON.stringify({
                 sourceIndex: selectedSourceIndex,
                 namespace: selectedNamespace,
@@ -1146,6 +1363,26 @@ function ready() {
     renderNamespaces();
     renderKeys();
     renderEditor();
+    // 主动请求数据（面板首次打开或重新加载时）
+    Editor.Message.send('framework-plugin', 'i18n-load-data', '');
+    // 检查是否需要进入选择模式（由 Inspector 触发打开面板时设置）
+    setTimeout(async () => {
+        try {
+            // @ts-ignore
+            const result = await Editor.Message.request('framework-plugin', 'i18n-check-pick-mode');
+            if (result && !pickMode) {
+                pickMode = true;
+                // 如果返回了当前 key，自动定位
+                const currentKey = (result === null || result === void 0 ? void 0 : result.currentKey) || '';
+                if (currentKey) {
+                    navigateToKey(currentKey);
+                }
+                updatePickModeUI();
+                setStatus('选择模式：点击 Key 列表中的项目选择', '#8c8');
+            }
+        }
+        catch (_a) { }
+    }, 300);
 }
 exports.ready = ready;
 function close() {
@@ -1205,6 +1442,16 @@ exports.methods = {
             setStatus(text, color || '#fff');
         }
         catch (_a) { }
+    },
+    /** 进入选择模式（从 Inspector 触发） */
+    enterPickMode(currentKey) {
+        pickMode = true;
+        // 如果传入了当前 key，自动定位到对应的 namespace + key
+        if (currentKey) {
+            navigateToKey(currentKey);
+        }
+        updatePickModeUI();
+        setStatus('选择模式：点击 Key 列表中的项目选择', '#8c8');
     },
     /** 接收可添加 i18n 的游戏列表 */
     setAvailableGames(dataStr) {

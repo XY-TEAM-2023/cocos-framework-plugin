@@ -35,6 +35,12 @@ const ios_1 = require("./ios");
 let i18nSources = [];
 /** 主语言（回退语言） */
 let i18nPrimaryLang = 'zh';
+/** Inspector 选择模式下被选中的 key（供轮询获取） */
+let i18nPickedKey = '';
+/** 是否有待处理的 pick mode 请求（面板打开后会主动检查） */
+let i18nWantPickMode = false;
+/** pick mode 时 Inspector 当前已设置的 key（用于面板自动定位） */
+let i18nPickCurrentKey = '';
 /** i18n 配置文件路径 */
 function getI18nConfigPath() {
     return path.join(getProjectPath(), 'assets/framework/resources/i18n/i18n-config.json');
@@ -2154,6 +2160,104 @@ exports.methods = {
         catch (e) {
             console.error('[i18n] removeLanguage 失败:', e);
         }
+    },
+    /** 翻译单个 key（返回主语言文本，供 Inspector 预览） */
+    async i18nTranslate(key) {
+        var _a;
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+        const dotIndex = key.indexOf('.');
+        if (dotIndex === -1)
+            return key;
+        const namespace = key.substring(0, dotIndex);
+        const leafKey = key.substring(dotIndex + 1);
+        for (const source of i18nSources) {
+            const entry = (_a = source.data[namespace]) === null || _a === void 0 ? void 0 : _a[leafKey];
+            if (entry) {
+                return entry[i18nPrimaryLang] || Object.values(entry).find(v => v) || key;
+            }
+        }
+        return key;
+    },
+    /** 获取指定 key 的所有语言翻译（供 Inspector 预览） */
+    async i18nTranslateAll(key) {
+        var _a;
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+        const dotIndex = key.indexOf('.');
+        if (dotIndex === -1)
+            return {};
+        const namespace = key.substring(0, dotIndex);
+        const leafKey = key.substring(dotIndex + 1);
+        for (const source of i18nSources) {
+            const entry = (_a = source.data[namespace]) === null || _a === void 0 ? void 0 : _a[leafKey];
+            if (entry)
+                return entry;
+        }
+        return {};
+    },
+    /** 获取所有 key 及其主语言翻译（供 Inspector 搜索下拉） */
+    async i18nGetAllKeys() {
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+        const result = {};
+        for (const source of i18nSources) {
+            for (const [ns, keys] of Object.entries(source.data)) {
+                for (const [key, translations] of Object.entries(keys)) {
+                    const fullKey = `${ns}.${key}`;
+                    if (!result[fullKey]) {
+                        result[fullKey] = translations[i18nPrimaryLang] || Object.values(translations).find(v => v) || '';
+                    }
+                }
+            }
+        }
+        return result;
+    },
+    /** 获取当前语言列表（供 Inspector 使用） */
+    async i18nGetLanguages() {
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+        return extractI18nLanguages(i18nSources);
+    },
+    /** 通知 i18n 面板进入选择模式（从 Inspector 触发） */
+    i18nEnterPickMode(currentKey) {
+        console.log(`[I18n-Main] i18nEnterPickMode("${currentKey || ''}") called`);
+        i18nWantPickMode = true;
+        i18nPickCurrentKey = currentKey || '';
+        Editor.Message.send('framework-plugin', 'set-i18n-pick-mode', currentKey || '');
+    },
+    /** 面板打开后检查是否需要进入选择模式（面板 ready 时调用） */
+    async i18nCheckPickMode() {
+        const want = i18nWantPickMode;
+        const key = i18nPickCurrentKey;
+        if (want) {
+            i18nWantPickMode = false;
+            i18nPickCurrentKey = '';
+        }
+        console.log(`[I18n-Main] i18nCheckPickMode() → ${want ? `pick, currentKey="${key}"` : 'false'}`);
+        return want ? { currentKey: key } : false;
+    },
+    /** 接收 i18n 面板回传的选中 key */
+    i18nKeyPicked(key) {
+        console.log(`[I18n-Main] i18nKeyPicked("${key}")`);
+        i18nPickedKey = key;
+    },
+    /** Inspector 轮询获取选中的 key（获取后清空） */
+    async i18nGetPickedKey() {
+        const key = i18nPickedKey;
+        i18nPickedKey = '';
+        if (key) {
+            console.log(`[I18n-Main] i18nGetPickedKey() → "${key}" (已清空)`);
+        }
+        return key;
     },
     /** 设置主语言 */
     setI18nPrimaryLang(dataStr) {

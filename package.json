@@ -180,6 +180,14 @@
   },
   "contributions": {
     "builder": "./dist/builder",
+    "inspector": {
+      "section": {
+        "node": {
+          "I18nLabel": "./dist/inspectors/i18n-label.js",
+          "I18nSprite": "./dist/inspectors/i18n-sprite.js"
+        }
+      }
+    },
     "menu": [
       {
         "path": "框架",
@@ -755,6 +763,33 @@
       },
       "i18n-set-primary-lang": {
         "methods": ["setI18nPrimaryLang"]
+      },
+      "i18n-translate": {
+        "methods": ["i18nTranslate"]
+      },
+      "i18n-translate-all": {
+        "methods": ["i18nTranslateAll"]
+      },
+      "i18n-get-all-keys": {
+        "methods": ["i18nGetAllKeys"]
+      },
+      "i18n-get-languages": {
+        "methods": ["i18nGetLanguages"]
+      },
+      "i18n-enter-pick-mode": {
+        "methods": ["i18nEnterPickMode"]
+      },
+      "i18n-check-pick-mode": {
+        "methods": ["i18nCheckPickMode"]
+      },
+      "i18n-key-picked": {
+        "methods": ["i18nKeyPicked"]
+      },
+      "i18n-get-picked-key": {
+        "methods": ["i18nGetPickedKey"]
+      },
+      "set-i18n-pick-mode": {
+        "methods": ["i18n.enterPickMode"]
       },
       "i18n-add-source": {
         "methods": ["addI18nSource"]
