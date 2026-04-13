@@ -72,62 +72,96 @@ function saveI18nConfig() {
         console.error('[i18n] 保存 i18n 配置失败:', e);
     }
 }
-/** 扫描所有 i18n JSON 文件 */
+/** 不扫描 i18n 的目录（框架、内部资源等） */
+const I18N_SCAN_EXCLUDE_DIRS = new Set(['framework', 'internal']);
+/**
+ * 扫描所有 i18n JSON 文件
+ *
+ * 扫描范围：
+ * 1. assets/ 下一级目录（如 platform、lobby 等），排除 framework/internal/games
+ * 2. assets/games/ 下各子游戏目录
+ * 只要目录内含 i18n/i18n.json 即视为有效数据源
+ */
 function scanI18nSources() {
     const projectPath = getProjectPath();
+    const assetsDir = path.join(projectPath, 'assets');
     const result = [];
-    // 1. 平台级 i18n
-    const platformPath = path.join(projectPath, 'assets/framework/resources/i18n/platform.json');
-    if (fs.existsSync(platformPath)) {
-        try {
-            const data = JSON.parse(fs.readFileSync(platformPath, 'utf8'));
-            result.push({ name: '平台 (platform)', filePath: platformPath, data });
-        }
-        catch (e) {
-            console.warn('[i18n] 解析 platform.json 失败:', e);
-        }
-    }
-    // 2. 各游戏 Bundle 的 i18n
-    const gamesDir = path.join(projectPath, 'assets/games');
-    if (fs.existsSync(gamesDir)) {
-        const dirs = fs.readdirSync(gamesDir, { withFileTypes: true });
-        for (const dir of dirs) {
-            if (!dir.isDirectory())
-                continue;
-            const i18nPath = path.join(gamesDir, dir.name, 'i18n/i18n.json');
-            if (fs.existsSync(i18nPath)) {
-                try {
-                    const data = JSON.parse(fs.readFileSync(i18nPath, 'utf8'));
-                    result.push({ name: dir.name, filePath: i18nPath, data });
-                }
-                catch (e) {
-                    console.warn(`[i18n] 解析 ${dir.name}/i18n/i18n.json 失败:`, e);
-                }
+    if (!fs.existsSync(assetsDir))
+        return result;
+    const topDirs = fs.readdirSync(assetsDir, { withFileTypes: true });
+    for (const dir of topDirs) {
+        if (!dir.isDirectory())
+            continue;
+        const dirName = dir.name;
+        // 跳过排除目录
+        if (I18N_SCAN_EXCLUDE_DIRS.has(dirName))
+            continue;
+        if (dirName === 'games') {
+            // games 下的子目录分别作为独立数据源
+            const gamesDir = path.join(assetsDir, 'games');
+            const gameDirs = fs.readdirSync(gamesDir, { withFileTypes: true });
+            for (const gameDir of gameDirs) {
+                if (!gameDir.isDirectory())
+                    continue;
+                _tryLoadI18nSource(result, path.join(gamesDir, gameDir.name), gameDir.name);
             }
+        }
+        else {
+            // assets 下的一级目录（platform、lobby 等）
+            _tryLoadI18nSource(result, path.join(assetsDir, dirName), dirName);
         }
     }
     return result;
 }
+/** 尝试从目录加载 i18n/i18n.json 作为数据源 */
+function _tryLoadI18nSource(result, dirPath, name) {
+    const i18nPath = path.join(dirPath, 'i18n/i18n.json');
+    if (!fs.existsSync(i18nPath))
+        return;
+    try {
+        const data = JSON.parse(fs.readFileSync(i18nPath, 'utf8'));
+        result.push({ name, filePath: i18nPath, data });
+    }
+    catch (e) {
+        console.warn(`[i18n] 解析 ${name}/i18n/i18n.json 失败:`, e);
+    }
+}
 /**
- * 列出所有尚未有 i18n 的游戏目录
+ * 列出所有尚未有 i18n 的 Bundle 目录
+ *
+ * 扫描范围同 scanI18nSources，但返回没有 i18n/i18n.json 的目录
  * 返回 { name, targetPath } 数组，targetPath 是将要生成的 i18n.json 完整路径
  */
-function listGamesWithoutI18n() {
+function listBundlesWithoutI18n() {
     const projectPath = getProjectPath();
-    const gamesDir = path.join(projectPath, 'assets/games');
+    const assetsDir = path.join(projectPath, 'assets');
     const result = [];
-    if (!fs.existsSync(gamesDir))
+    if (!fs.existsSync(assetsDir))
         return result;
-    const dirs = fs.readdirSync(gamesDir, { withFileTypes: true });
-    for (const dir of dirs) {
+    const topDirs = fs.readdirSync(assetsDir, { withFileTypes: true });
+    for (const dir of topDirs) {
         if (!dir.isDirectory())
             continue;
-        const i18nPath = path.join(gamesDir, dir.name, 'i18n/i18n.json');
-        if (!fs.existsSync(i18nPath)) {
-            result.push({
-                name: dir.name,
-                targetPath: i18nPath,
-            });
+        const dirName = dir.name;
+        if (I18N_SCAN_EXCLUDE_DIRS.has(dirName))
+            continue;
+        if (dirName === 'games') {
+            const gamesDir = path.join(assetsDir, 'games');
+            const gameDirs = fs.readdirSync(gamesDir, { withFileTypes: true });
+            for (const gameDir of gameDirs) {
+                if (!gameDir.isDirectory())
+                    continue;
+                const i18nPath = path.join(gamesDir, gameDir.name, 'i18n/i18n.json');
+                if (!fs.existsSync(i18nPath)) {
+                    result.push({ name: gameDir.name, targetPath: i18nPath });
+                }
+            }
+        }
+        else {
+            const i18nPath = path.join(assetsDir, dirName, 'i18n/i18n.json');
+            if (!fs.existsSync(i18nPath)) {
+                result.push({ name: dirName, targetPath: i18nPath });
+            }
         }
     }
     return result;
@@ -2279,11 +2313,13 @@ exports.methods = {
      */
     addI18nSource(dataStr) {
         try {
-            const { gameName } = JSON.parse(dataStr);
+            const { bundleName, targetPath: targetPathFromPanel } = JSON.parse(dataStr);
+            const name = bundleName;
+            // 支持面板传入完整 targetPath（由 listBundlesWithoutI18n 提供）
             const projectPath = getProjectPath();
-            const targetPath = path.join(projectPath, 'assets/games', gameName, 'i18n/i18n.json');
+            const targetPath = targetPathFromPanel || path.join(projectPath, 'assets', name, 'i18n/i18n.json');
             if (fs.existsSync(targetPath)) {
-                sendI18nStatus(`"${gameName}" 已有 i18n 数据源`, '#ce9178');
+                sendI18nStatus(`"${name}" 已有 i18n 数据源`, '#ce9178');
                 return;
             }
             // 确保目录存在
@@ -2291,7 +2327,7 @@ exports.methods = {
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
             }
-            // 创建空的 i18n JSON（带一个默认命名空间）
+            // 创建空的 i18n JSON
             const initData = {};
             fs.writeFileSync(targetPath, JSON.stringify(initData, null, 4), 'utf8');
             // 刷新资产数据库并重新加载
@@ -2299,8 +2335,7 @@ exports.methods = {
             // 重新扫描
             i18nSources = scanI18nSources();
             sendI18nDataToPanel();
-            // 将相对路径显示给用户确认
-            const relativePath = `assets/games/${gameName}/i18n/i18n.json`;
+            const relativePath = path.relative(projectPath, targetPath).replace(/\\/g, '/');
             sendI18nStatus(`已创建数据源: ${relativePath}`, '#4ec9b0');
         }
         catch (e) {
@@ -2318,11 +2353,6 @@ exports.methods = {
             const source = i18nSources[sourceIndex];
             if (!source)
                 return;
-            // 禁止删除平台数据源
-            if (source.name === '平台 (platform)') {
-                sendI18nStatus('不能移除平台数据源', '#ce9178');
-                return;
-            }
             // 删除 i18n.json 文件
             if (fs.existsSync(source.filePath)) {
                 fs.unlinkSync(source.filePath);
@@ -2352,22 +2382,22 @@ exports.methods = {
         }
     },
     /**
-     * 列出所有可添加 i18n 的游戏目录
-     * 返回尚未有 i18n.json 的游戏列表（含将要生成的文件路径）
+     * 列出所有可添加 i18n 的 Bundle 目录
+     * 返回尚未有 i18n/i18n.json 的 Bundle 列表（含将要生成的文件路径）
      */
     listAvailableGamesForI18n() {
         try {
-            const games = listGamesWithoutI18n();
+            const bundles = listBundlesWithoutI18n();
             const projectPath = getProjectPath();
-            // 转成相对路径方便显示
-            const list = games.map(g => ({
-                name: g.name,
-                relativePath: path.relative(projectPath, g.targetPath).replace(/\\/g, '/'),
+            const list = bundles.map(b => ({
+                name: b.name,
+                targetPath: b.targetPath,
+                relativePath: path.relative(projectPath, b.targetPath).replace(/\\/g, '/'),
             }));
             Editor.Message.send('framework-plugin', 'set-i18n-available-games', JSON.stringify(list));
         }
         catch (e) {
-            console.error('[i18n] listAvailableGames 失败:', e);
+            console.error('[i18n] listAvailableBundles 失败:', e);
         }
     },
 };

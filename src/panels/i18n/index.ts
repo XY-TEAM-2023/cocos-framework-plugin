@@ -28,6 +28,7 @@ interface I18nPayload {
 
 interface AvailableGame {
     name: string;
+    targetPath?: string;
     relativePath: string;
 }
 
@@ -75,7 +76,7 @@ export const template = `
             <span class="toolbar-title">国际化资源管理</span>
             <div id="source-group">
                 <select id="source-selector"></select>
-                <button id="btn-add-source" class="source-btn" title="为游戏添加国际化数据源">+</button>
+                <button id="btn-add-source" class="source-btn" title="为 Bundle 添加国际化数据源">+</button>
                 <button id="btn-remove-source" class="source-btn danger" title="移除当前数据源">−</button>
             </div>
         </div>
@@ -107,7 +108,7 @@ export const template = `
                 <span>添加国际化数据源</span>
                 <button id="btn-close-dialog" class="dialog-close">✕</button>
             </div>
-            <div class="dialog-hint">仅支持 assets/games/ 目录下的游戏 Bundle，选择后将自动创建 i18n.json 文件并切换到该数据源</div>
+            <div class="dialog-hint">选择 Bundle 目录，将自动创建 i18n/i18n.json 文件并切换到该数据源</div>
             <div id="available-games-list" class="dialog-body"></div>
         </div>
     </div>
@@ -893,21 +894,21 @@ function updateVarHints() {
     varHintBar.innerHTML = html;
 }
 
-/** 渲染添加数据源弹窗中的游戏列表 */
+/** 渲染添加数据源弹窗中的 Bundle 列表 */
 function renderAvailableGames() {
     const list = panelRef?.$['available-games-list'] as HTMLElement;
     if (!list) return;
 
     if (availableGames.length === 0) {
-        list.innerHTML = '<div class="dialog-empty">所有游戏目录都已配置国际化数据源</div>';
+        list.innerHTML = '<div class="dialog-empty">所有 Bundle 目录都已配置国际化数据源</div>';
         return;
     }
 
-    list.innerHTML = availableGames.map(game => {
-        return `<div class="game-item" data-game="${esc(game.name)}">
+    list.innerHTML = availableGames.map(bundle => {
+        return `<div class="game-item" data-game="${esc(bundle.name)}">
             <div class="game-item-info">
-                <span class="game-item-name">${esc(game.name)}</span>
-                <span class="game-item-path">${esc(game.relativePath)}</span>
+                <span class="game-item-name">${esc(bundle.name)}</span>
+                <span class="game-item-path">${esc(bundle.relativePath)}</span>
             </div>
             <button class="game-item-btn">添加</button>
         </div>`;
@@ -915,17 +916,20 @@ function renderAvailableGames() {
 
     // 绑定点击
     list.querySelectorAll('.game-item').forEach((el: Element) => {
-        const gameName = el.getAttribute('data-game')!;
-        const game = availableGames.find(g => g.name === gameName);
+        const bundleName = el.getAttribute('data-game')!;
+        const bundle = availableGames.find(g => g.name === bundleName);
 
         el.querySelector('.game-item-btn')?.addEventListener('click', async () => {
-            if (!game) return;
-            const result = await Editor.Dialog.info(`将在以下路径创建 i18n 数据文件：\n\n${game.relativePath}`, {
+            if (!bundle) return;
+            const result = await Editor.Dialog.info(`将在以下路径创建 i18n 数据文件：\n\n${bundle.relativePath}`, {
                 title: '确认添加', buttons: ['确认', '取消'], default: 0, cancel: 1,
             });
             if (result.response === 0) {
-                pendingSwitchSource = gameName;
-                Editor.Message.send('framework-plugin', 'i18n-add-source', JSON.stringify({ gameName }));
+                pendingSwitchSource = bundleName;
+                Editor.Message.send('framework-plugin', 'i18n-add-source', JSON.stringify({
+                    bundleName,
+                    targetPath: bundle.targetPath || '',
+                }));
                 closeAddSourceDialog();
             }
         });
