@@ -126,6 +126,100 @@ function scanI18nSources(): I18nSource[] {
     return result;
 }
 
+/** 内部：根据 namespace.key 查主语言翻译（同步，纯内存查询） */
+function getI18nTextSync(key: string): string {
+    if (i18nSources.length === 0) {
+        loadI18nConfig();
+        i18nSources = scanI18nSources();
+    }
+    const dotIndex = key.indexOf('.');
+    if (dotIndex === -1) return key;
+    const namespace = key.substring(0, dotIndex);
+    const leafKey = key.substring(dotIndex + 1);
+    for (const source of i18nSources) {
+        const entry = source.data[namespace]?.[leafKey];
+        if (entry) {
+            return entry[i18nPrimaryLang] || Object.values(entry).find(v => v) || key;
+        }
+    }
+    return key;
+}
+
+/**
+ * 扫描当前场景中所有 I18nLabel + cc.Label 节点，把翻译文本同步到 Label.string
+ *
+ * 触发时机：scene:ready 广播（场景打开/重新加载完成）
+ * 仅修改编辑器内场景内存表现，不会保存到磁盘文件，避免污染 prefab/scene
+ */
+let syncing = false;
+async function syncAllI18nLabelsInScene(): Promise<void> {
+    if (syncing) return;
+    syncing = true;
+    try {
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+
+        // @ts-ignore
+        const tree = await Editor.Message.request('scene', 'query-node-tree');
+        if (!tree) return;
+
+        const uuids: string[] = [];
+        const collect = (node: any) => {
+            if (node?.uuid) uuids.push(node.uuid);
+            if (Array.isArray(node?.children)) {
+                for (const c of node.children) collect(c);
+            }
+        };
+        collect(tree);
+
+        let synced = 0;
+        for (const uuid of uuids) {
+            try {
+                // @ts-ignore
+                const dump = await Editor.Message.request('scene', 'query-node', uuid);
+                if (!dump?.__comps__) continue;
+
+                let labelIdx = -1;
+                let i18nKey = '';
+                for (let i = 0; i < dump.__comps__.length; i++) {
+                    const comp = dump.__comps__[i];
+                    if (comp?.type === 'cc.Label') labelIdx = i;
+                    else if (comp?.type === 'I18nLabel') i18nKey = comp.value?.key?.value || '';
+                }
+
+                if (labelIdx < 0 || !i18nKey) continue;
+
+                const text = getI18nTextSync(i18nKey);
+                if (!text || text === i18nKey) continue;
+
+                // 已是翻译文本则跳过，避免重复 set-property
+                const currentValue = dump.__comps__[labelIdx]?.value?.string?.value;
+                if (currentValue === text) continue;
+
+                // @ts-ignore
+                await Editor.Message.request('scene', 'set-property', {
+                    uuid,
+                    path: `__comps__.${labelIdx}.string`,
+                    dump: { type: 'cc.String', value: text },
+                });
+                synced++;
+            } catch {
+                // 单节点失败忽略
+            }
+        }
+
+        if (synced > 0) {
+            console.log(`[i18n] 场景已同步 ${synced} 个 I18nLabel 翻译到 Label.string`);
+        }
+    } catch (e) {
+        console.warn('[i18n] syncAllI18nLabelsInScene 失败:', e);
+    } finally {
+        syncing = false;
+    }
+}
+
 /** 尝试从目录加载 i18n/i18n.json 作为数据源 */
 function _tryLoadI18nSource(result: I18nSource[], dirPath: string, name: string): void {
     const i18nPath = path.join(dirPath, 'i18n/i18n.json');
@@ -2606,6 +2700,12 @@ export const methods: { [key: string]: (...args: any) => any } = {
     },
 };
 
+/** 场景就绪回调：批量同步 I18nLabel 翻译到编辑器内场景的 Label.string */
+const onSceneReady = () => {
+    // 延迟，等场景资源完全就绪后再扫描节点
+    setTimeout(() => { syncAllI18nLabelsInScene(); }, 600);
+};
+
 export const load = function () {
     console.log('[框架管理] 插件已加载');
     // 显示 R2 自动询问状态
@@ -2613,8 +2713,19 @@ export const load = function () {
     if (config?.autoPromptAfterBuild) {
         console.log('[框架管理] R2 构建后自动询问上传：已开启');
     }
+    // 注册场景就绪监听，自动同步 I18nLabel 翻译预览
+    try {
+        // @ts-ignore
+        Editor.Message.addBroadcastListener('scene:ready', onSceneReady);
+    } catch (e) {
+        console.warn('[框架管理] 注册 scene:ready 广播监听失败:', e);
+    }
 };
 
 export const unload = function () {
     console.log('[框架管理] 插件已卸载');
+    try {
+        // @ts-ignore
+        Editor.Message.removeBroadcastListener('scene:ready', onSceneReady);
+    } catch {}
 };

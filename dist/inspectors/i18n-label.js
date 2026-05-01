@@ -23,6 +23,8 @@ let paramI18nTranslations = {};
 let detectedPlaceholders = new Set();
 /** 当前 dump 数据 */
 let currentDump = null;
+/** 上次自动同步过的 (nodeUuid + compPath + key)，避免 update 频繁触发重复同步 */
+let lastAutoSyncSig = '';
 /** 面板引用 */
 let panelThis = null;
 /** 是否处于 key 选择模式（模块级，跨 close/ready 生命周期） */
@@ -278,6 +280,21 @@ function update(dump) {
     }
     // 加载翻译预览（内部会检测占位符并渲染参数）
     updatePreview(this, key);
+    // 自动同步 Label.string：编辑器中场景从磁盘加载时 Label.string 是 key 本身，
+    // 这里让选中此 I18nLabel 的节点时自动写入翻译文本，避免编辑器看不到翻译
+    if (key) {
+        // @ts-ignore
+        const nodeUuids = Editor.Selection.getSelected('node');
+        const nodeUuid = (nodeUuids === null || nodeUuids === void 0 ? void 0 : nodeUuids[0]) || '';
+        const sig = `${nodeUuid}|${dump.path || ''}|${key}`;
+        if (sig !== lastAutoSyncSig) {
+            lastAutoSyncSig = sig;
+            syncLabelString(key);
+        }
+    }
+    else {
+        lastAutoSyncSig = '';
+    }
 }
 exports.update = update;
 function ready() {
@@ -421,6 +438,8 @@ async function applyPickedKey(key) {
     else {
         console.warn(`${LOG_TAG} currentDump?.value?.key 不存在，无法设置 key`);
     }
+    // 设置完 key 后，将翻译文本同步写入 Label.string（编辑器实时预览）
+    await syncLabelString(key);
     // 立即更新显示
     const keyDisplay = panelThis === null || panelThis === void 0 ? void 0 : panelThis.$['key-display'];
     if (keyDisplay) {
@@ -430,6 +449,58 @@ async function applyPickedKey(key) {
     // 刷新翻译预览
     loadAllKeys();
     updatePreview(panelThis, key);
+}
+/**
+ * 将 i18n 翻译文本同步写入同节点的 Label.string
+ * 通过 scene:set-property 直接修改场景中 Label 组件的 string 属性
+ */
+async function syncLabelString(key) {
+    try {
+        // 获取翻译文本
+        // @ts-ignore
+        const text = await Editor.Message.request('framework-plugin', 'i18n-translate', key);
+        if (!text || text === key)
+            return;
+        // 获取选中节点
+        // @ts-ignore
+        const nodeUuids = Editor.Selection.getSelected('node');
+        const nodeUuid = nodeUuids === null || nodeUuids === void 0 ? void 0 : nodeUuids[0];
+        if (!nodeUuid)
+            return;
+        // 从 I18nLabel 的组件路径推算 Label 组件路径
+        // I18nLabel path 格式：__comps__.N，Label 通常在它前面
+        const i18nCompPath = currentDump === null || currentDump === void 0 ? void 0 : currentDump.path;
+        if (!i18nCompPath)
+            return;
+        // 查询节点的所有组件，找到 cc.Label 的索引
+        // @ts-ignore
+        const nodeDump = await Editor.Message.request('scene', 'query-node', nodeUuid);
+        if (!(nodeDump === null || nodeDump === void 0 ? void 0 : nodeDump.__comps__))
+            return;
+        let labelCompPath = '';
+        for (let i = 0; i < nodeDump.__comps__.length; i++) {
+            const comp = nodeDump.__comps__[i];
+            if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.Label') {
+                labelCompPath = `__comps__.${i}`;
+                break;
+            }
+        }
+        if (!labelCompPath)
+            return;
+        // @ts-ignore
+        await Editor.Message.request('scene', 'set-property', {
+            uuid: nodeUuid,
+            path: `${labelCompPath}.string`,
+            dump: {
+                type: 'cc.String',
+                value: text,
+            },
+        });
+        console.log(`${LOG_TAG} syncLabelString: Label.string 已设置为 "${text}"`);
+    }
+    catch (e) {
+        console.warn(`${LOG_TAG} syncLabelString 失败:`, e);
+    }
 }
 /** 应用选中的 key 到参数值 */
 async function applyPickedParamKey(key) {

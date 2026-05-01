@@ -36,11 +36,6 @@ exports.template = `
     <div id="toolbar">
         <div id="toolbar-left">
             <span class="toolbar-title">国际化资源管理</span>
-            <div id="source-group">
-                <select id="source-selector"></select>
-                <button id="btn-add-source" class="source-btn" title="为 Bundle 添加国际化数据源">+</button>
-                <button id="btn-remove-source" class="source-btn danger" title="移除当前数据源">−</button>
-            </div>
         </div>
         <div id="toolbar-right">
             <button id="btn-lang-manage" class="tool-btn" title="语言管理">语言管理</button>
@@ -75,8 +70,20 @@ exports.template = `
         </div>
     </div>
 
-    <!-- 三栏内容 -->
+    <!-- 内容区 -->
     <div id="content-area">
+        <!-- 最左栏：配置文件 -->
+        <div id="col-source">
+            <div class="col-header">
+                <span>配置文件</span>
+                <div class="col-header-actions">
+                    <button id="btn-add-source" class="col-header-btn" title="为 Bundle 添加国际化数据源">+</button>
+                    <button id="btn-remove-source" class="col-header-btn danger" title="移除当前数据源">−</button>
+                </div>
+            </div>
+            <div id="source-list" class="col-body"></div>
+        </div>
+
         <!-- 左栏：命名空间 -->
         <div id="col-ns">
             <div class="col-header">
@@ -152,21 +159,6 @@ exports.style = `
 #toolbar-left { display: flex; align-items: center; gap: 12px; }
 #toolbar-right { display: flex; align-items: center; gap: 6px; }
 .toolbar-title { font-size: 14px; font-weight: 600; color: #e0e0e0; }
-
-/* 数据源选择器组 */
-#source-group { display: flex; align-items: center; gap: 4px; }
-#source-selector {
-    background: #2a2a2a; color: #d4d4d4; border: 1px solid #404040;
-    border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none;
-}
-.source-btn {
-    background: #2a2a2a; color: #007ACC; border: 1px solid #404040;
-    border-radius: 4px; width: 26px; height: 26px; font-size: 16px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; line-height: 1;
-}
-.source-btn:hover { background: #007ACC; color: #fff; border-color: #007ACC; }
-.source-btn.danger { color: #f66; }
-.source-btn.danger:hover { background: #a03030; color: #fff; border-color: #a03030; }
 
 .tool-btn {
     background: #2a2a2a; color: #d4d4d4; border: 1px solid #404040;
@@ -263,12 +255,32 @@ exports.style = `
     min-height: 36px; gap: 8px;
 }
 .col-header span { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; }
+.col-header-actions { display: flex; align-items: center; gap: 4px; }
 .col-header-btn {
     background: none; border: 1px solid #404040; color: #007ACC;
     border-radius: 4px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1;
 }
 .col-header-btn:hover { background: #007ACC; color: #fff; border-color: #007ACC; }
+.col-header-btn.danger { color: #f66; }
+.col-header-btn.danger:hover { background: #a03030; color: #fff; border-color: #a03030; }
 .col-body { flex: 1; overflow-y: auto; }
+
+/* 最左栏 - 配置文件 */
+#col-source {
+    width: 200px; min-width: 160px; display: flex; flex-direction: column;
+    border-right: 1px solid #2a2a2a; background: #111;
+}
+.source-item {
+    display: flex; align-items: center; padding: 10px 12px; cursor: pointer;
+    border-bottom: 1px solid #1a1a1a; transition: background 0.1s;
+}
+.source-item:hover { background: #1a1a1a; }
+.source-item.active { background: #1a2a3a; border-left: 3px solid #007ACC; }
+.source-item-name {
+    font-size: 13px; color: #d4d4d4; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.source-item.active .source-item-name { color: #fff; }
 
 /* 左栏 - 命名空间 */
 #col-ns {
@@ -463,7 +475,7 @@ exports.style = `
 .col-body::-webkit-scrollbar-thumb:hover { background: #555; }
 `;
 exports.$ = {
-    'source-selector': '#source-selector',
+    'source-list': '#source-list',
     'btn-add-source': '#btn-add-source',
     'btn-remove-source': '#btn-remove-source',
     'btn-lang-manage': '#btn-lang-manage',
@@ -504,13 +516,38 @@ function getSourceData() {
         return null;
     return payload.fullData[selectedSourceIndex].data;
 }
-/** 渲染数据源选择器 */
-function renderSourceSelector() {
+/** 渲染配置文件列表 */
+function renderSourceList() {
     var _a;
-    const sel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['source-selector'];
-    if (!sel || !payload)
+    const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['source-list'];
+    if (!list || !payload)
         return;
-    sel.innerHTML = payload.sources.map((s, i) => `<option value="${i}"${i === selectedSourceIndex ? ' selected' : ''}>${s.name}</option>`).join('');
+    if (payload.sources.length === 0) {
+        list.innerHTML = '<div class="empty-hint">暂无数据源</div>';
+    }
+    else {
+        list.innerHTML = payload.sources.map((s, i) => {
+            const isActive = i === selectedSourceIndex;
+            return `<div class="source-item${isActive ? ' active' : ''}" data-index="${i}">
+                <span class="source-item-name">${esc(s.name)}</span>
+            </div>`;
+        }).join('');
+        // 绑定点击切换
+        list.querySelectorAll('.source-item').forEach((el) => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.getAttribute('data-index') || '0', 10) || 0;
+                if (idx === selectedSourceIndex)
+                    return;
+                selectedSourceIndex = idx;
+                selectedNamespace = '';
+                selectedKey = '';
+                renderSourceList();
+                renderNamespaces();
+                renderKeys();
+                renderEditor();
+            });
+        });
+    }
     // 平台数据源不能移除，隐藏 − 按钮
     const removeBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-remove-source'];
     if (removeBtn) {
@@ -1012,7 +1049,7 @@ function navigateToKey(fullKey) {
             // 切换数据源
             if (selectedSourceIndex !== i) {
                 selectedSourceIndex = i;
-                renderSourceSelector();
+                renderSourceList();
             }
             // 选中命名空间
             selectedNamespace = ns;
@@ -1039,7 +1076,7 @@ function navigateToKey(fullKey) {
         if (sourceData[ns]) {
             if (selectedSourceIndex !== i) {
                 selectedSourceIndex = i;
-                renderSourceSelector();
+                renderSourceList();
             }
             selectedNamespace = ns;
             selectedKey = '';
@@ -1112,17 +1149,6 @@ function ready() {
         pickMode = false;
         // 关闭面板
         Editor.Panel.close('framework-plugin.i18n');
-    });
-    // 数据源切换
-    const sourceSel = this.$['source-selector'];
-    sourceSel === null || sourceSel === void 0 ? void 0 : sourceSel.addEventListener('change', () => {
-        selectedSourceIndex = parseInt(sourceSel.value) || 0;
-        selectedNamespace = '';
-        selectedKey = '';
-        renderSourceSelector(); // 更新 − 按钮显隐
-        renderNamespaces();
-        renderKeys();
-        renderEditor();
     });
     // 添加数据源
     (_c = this.$['btn-add-source']) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => {
@@ -1429,7 +1455,7 @@ exports.methods = {
                 selectedNamespace = '';
                 selectedKey = '';
             }
-            renderSourceSelector();
+            renderSourceList();
             renderNamespaces();
             renderKeys();
             renderEditor();
