@@ -1,48 +1,97 @@
 /**
  * I18nSprite 自定义 Inspector 面板
  *
- * 功能：
- * - basePath 输入框：设置基础资源路径
- * - bundleName 输入框：指定 Bundle
- * - 资源预览列表：自动列出所有语言和对应资源路径
+ * 架构（与 i18n-label 保持一致）：
+ * - 模块级共享只读：i18n 数据快照（snapshot），由 main.ts 推送变更
+ * - 实例级独立状态：每个 inspector 实例的状态挂在 `panelThis._inst`
+ * - update() 完全同步
  */
 
 'use strict';
 
-/** 当前 dump 数据 */
-let currentDump: any = null;
+const LOG_TAG = '[I18nSprite-Inspector]';
 
-/** 面板引用 */
-let panelThis: any = null;
+// ==================== 模块级：i18n 快照（共享只读） ====================
 
-/** 语言列表 */
-let langList: string[] = [];
+interface I18nSpriteSnapshot {
+    languages: string[];
+    primaryLang: string;
+    version: number;
+}
+
+let snapshot: I18nSpriteSnapshot = {
+    languages: [],
+    primaryLang: 'zh',
+    version: -1,
+};
+
+let snapshotLoading: Promise<void> | null = null;
+const liveInstances = new Set<any>();
+let broadcastRegistered = false;
+
+const onI18nDataChanged = (_version?: number) => {
+    void refreshSnapshot(true);
+};
+
+async function refreshSnapshot(force: boolean = false): Promise<void> {
+    if (snapshotLoading && !force) return snapshotLoading;
+    snapshotLoading = (async () => {
+        try {
+            // @ts-ignore
+            const data = await Editor.Message.request('framework-plugin', 'i18n-get-snapshot');
+            if (data) {
+                snapshot = {
+                    languages: data.languages || [],
+                    primaryLang: data.primaryLang || 'zh',
+                    version: data.version || 0,
+                };
+                console.log(`${LOG_TAG} snapshot v${snapshot.version}, ${snapshot.languages.length} langs`);
+                liveInstances.forEach(self => {
+                    try { renderAll(self); } catch {}
+                });
+            }
+        } catch (e) {
+            console.warn(`${LOG_TAG} 拉取快照失败:`, e);
+        } finally {
+            snapshotLoading = null;
+        }
+    })();
+    return snapshotLoading;
+}
+
+// ==================== 实例级状态 ====================
+
+interface InstState {
+    dump: any;
+}
+
+function getInst(self: any): InstState {
+    if (!self._inst) {
+        self._inst = { dump: null } as InstState;
+    }
+    return self._inst as InstState;
+}
+
+// ==================== 模板 ====================
 
 export const template = `
 <div class="i18n-sprite-inspector">
-    <!-- 基础路径 -->
     <ui-prop>
         <ui-label slot="label" tooltip="基础路径，运行时自动拼接 basePath_{lang} 加载 SpriteFrame">基础路径</ui-label>
         <div slot="content">
             <input id="base-path" type="text" placeholder='如 "textures/i18n/logo"' />
         </div>
     </ui-prop>
-
-    <!-- Bundle 名称 -->
     <ui-prop>
         <ui-label slot="label" tooltip="SpriteFrame 所在 Bundle 名称，留空使用 resources">Bundle</ui-label>
         <div slot="content">
             <input id="bundle-name" type="text" placeholder="留空使用 resources" />
         </div>
     </ui-prop>
-
-    <!-- 使用说明 -->
     <div id="hint-bar" class="hint-bar">
         <span class="hint-icon">💡</span>
         <span>运行时自动加载 <code id="path-example">basePath_{lang}/spriteFrame</code></span>
     </div>
-
-    <!-- 资源预览列表 -->
     <div id="lang-preview" class="lang-preview"></div>
 </div>
 `;
@@ -55,7 +104,6 @@ export const style = `
     border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none;
 }
 .i18n-sprite-inspector input:focus { border-color: #007ACC; }
-
 .hint-bar {
     display: flex; align-items: center; gap: 6px;
     padding: 6px 12px; margin: 4px 0;
@@ -67,7 +115,6 @@ export const style = `
     font-family: 'SF Mono', Menlo, monospace; color: #4ec9b0;
 }
 .hint-icon { font-size: 13px; }
-
 .lang-preview { padding: 4px 0; }
 .lang-preview-title {
     font-size: 11px; color: #888; padding: 6px 12px 4px;
@@ -91,90 +138,97 @@ export const $ = {
     'lang-preview': '#lang-preview',
 };
 
-export function update(this: any, dump: any) {
-    currentDump = dump;
-    panelThis = this;
-
-    if (!dump || !dump.value) return;
-
-    // 更新输入框
-    const basePathInput = this.$['base-path'] as HTMLInputElement;
-    const bundleNameInput = this.$['bundle-name'] as HTMLInputElement;
-
-    if (basePathInput && document.activeElement !== basePathInput) {
-        basePathInput.value = dump.value.basePath?.value || '';
-    }
-    if (bundleNameInput && document.activeElement !== bundleNameInput) {
-        bundleNameInput.value = dump.value.bundleName?.value || '';
-    }
-
-    // 更新路径示例
-    updatePathExample(this);
-
-    // 更新语言预览
-    renderLangPreview(this);
-}
+// ==================== 生命周期 ====================
 
 export function ready(this: any) {
-    panelThis = this;
+    liveInstances.add(this);
 
-    // 加载语言列表
-    loadLanguages();
+    if (!broadcastRegistered) {
+        try {
+            // @ts-ignore
+            Editor.Message.addBroadcastListener('framework-plugin:i18n-data-changed', onI18nDataChanged);
+            broadcastRegistered = true;
+        } catch (e) {
+            console.warn(`${LOG_TAG} 注册 broadcast 监听失败:`, e);
+        }
+    }
+    if (snapshot.version < 0) void refreshSnapshot();
 
     const basePathInput = this.$['base-path'] as HTMLInputElement;
     const bundleNameInput = this.$['bundle-name'] as HTMLInputElement;
 
     basePathInput?.addEventListener('change', () => {
-        if (currentDump?.value?.basePath) {
-            currentDump.value.basePath.value = basePathInput.value.trim();
-            panelThis.dispatch('change-dump');
+        const inst = getInst(this);
+        if (inst.dump?.value?.basePath) {
+            inst.dump.value.basePath.value = basePathInput.value.trim();
+            commitProperty(this, 'basePath');
         }
-        updatePathExample(panelThis);
-        renderLangPreview(panelThis);
+        renderAll(this);
     });
 
     bundleNameInput?.addEventListener('change', () => {
-        if (currentDump?.value?.bundleName) {
-            currentDump.value.bundleName.value = bundleNameInput.value.trim();
-            panelThis.dispatch('change-dump');
+        const inst = getInst(this);
+        if (inst.dump?.value?.bundleName) {
+            inst.dump.value.bundleName.value = bundleNameInput.value.trim();
+            commitProperty(this, 'bundleName');
         }
     });
 }
 
-/** 加载语言列表 */
-async function loadLanguages() {
-    try {
-        // @ts-ignore
-        langList = await Editor.Message.request('framework-plugin', 'i18n-get-languages') || [];
-    } catch {
-        langList = [];
-    }
-    if (panelThis) renderLangPreview(panelThis);
+export function update(this: any, dump: any) {
+    const inst = getInst(this);
+    inst.dump = dump;
+    if (!dump || !dump.value) return;
+    renderAll(this);
 }
 
-/** 更新路径示例 */
+export function close(this: any) {
+    liveInstances.delete(this);
+}
+
+// ==================== 渲染（同步） ====================
+
+function renderAll(self: any) {
+    const inst = getInst(self);
+    if (!inst.dump || !inst.dump.value) return;
+
+    const basePathInput = self.$['base-path'] as HTMLInputElement;
+    const bundleNameInput = self.$['bundle-name'] as HTMLInputElement;
+
+    if (basePathInput && document.activeElement !== basePathInput) {
+        basePathInput.value = inst.dump.value.basePath?.value || '';
+    }
+    if (bundleNameInput && document.activeElement !== bundleNameInput) {
+        bundleNameInput.value = inst.dump.value.bundleName?.value || '';
+    }
+
+    updatePathExample(self);
+    renderLangPreview(self);
+}
+
 function updatePathExample(self: any) {
+    const inst = getInst(self);
     const example = self.$['path-example'] as HTMLElement;
     if (!example) return;
-
-    const basePath = currentDump?.value?.basePath?.value || 'basePath';
+    const basePath = inst.dump?.value?.basePath?.value || 'basePath';
     example.textContent = `${basePath}_{lang}/spriteFrame`;
 }
 
-/** 渲染语言资源预览 */
 function renderLangPreview(self: any) {
+    const inst = getInst(self);
     const container = self.$['lang-preview'] as HTMLElement;
     if (!container) return;
 
-    const basePath = currentDump?.value?.basePath?.value || '';
+    const basePath = inst.dump?.value?.basePath?.value || '';
+    const langs = snapshot.languages;
 
-    if (!basePath || langList.length === 0) {
+    if (!basePath || langs.length === 0) {
         container.innerHTML = '';
         return;
     }
 
     let html = '<div class="lang-preview-title">各语言资源路径</div>';
-    html += langList.map(lang => {
+    html += langs.map(lang => {
         const fullPath = `${basePath}_${lang}`;
         return `<div class="lang-row">
             <span class="lang-code">${escHtml(lang)}</span>
@@ -183,6 +237,36 @@ function renderLangPreview(self: any) {
     }).join('');
 
     container.innerHTML = html;
+}
+
+// ==================== Scene API ====================
+
+async function commitProperty(self: any, propertyName: string): Promise<void> {
+    const inst = getInst(self);
+    const dump = inst.dump;
+    const propDump = dump?.value?.[propertyName];
+    if (!propDump) return;
+
+    // @ts-ignore
+    const nodeUuids = Editor.Selection.getSelected('node');
+    const nodeUuid = nodeUuids?.[0] || '';
+    if (!nodeUuid) {
+        try { self.dispatch('change-dump'); } catch {}
+        return;
+    }
+
+    const propertyPath = propDump.path || `${dump.path || ''}.${propertyName}`;
+    try {
+        // @ts-ignore
+        await Editor.Message.request('scene', 'set-property', {
+            uuid: nodeUuid,
+            path: propertyPath,
+            dump: { type: propDump.type, value: propDump.value, isArray: propDump.isArray },
+        });
+    } catch (e) {
+        console.error(`${LOG_TAG} commitProperty(${propertyName}) 失败:`, e);
+        try { self.dispatch('change-dump'); } catch {}
+    }
 }
 
 function escHtml(str: string): string {

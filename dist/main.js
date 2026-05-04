@@ -41,6 +41,24 @@ let i18nPickedKey = '';
 let i18nWantPickMode = false;
 /** pick mode 时 Inspector 当前已设置的 key（用于面板自动定位） */
 let i18nPickCurrentKey = '';
+/** i18n 数据版本号，每次写入递增；Inspector 通过对比版本号决定是否刷新本地快照 */
+let i18nDataVersion = 0;
+/**
+ * 通知所有 Inspector：i18n 数据已变更
+ * 1. 递增 version
+ * 2. 同时通过 set-i18n-data 把数据推给 panel
+ * 3. 通过 broadcast 通知所有 inspector 重新拉取 snapshot
+ */
+function notifyI18nDataChanged() {
+    i18nDataVersion++;
+    try {
+        // @ts-ignore  Cocos Creator 3.x broadcast API
+        Editor.Message.broadcast('framework-plugin:i18n-data-changed', i18nDataVersion);
+    }
+    catch (e) {
+        // broadcast 不可用时不阻断，inspector 可通过 i18n-get-snapshot 主动拉取
+    }
+}
 /** i18n 配置文件路径 */
 function getI18nConfigPath() {
     return path.join(getProjectPath(), 'assets/framework/resources/i18n/i18n-config.json');
@@ -433,6 +451,8 @@ function sendI18nDataToPanel() {
         refCounts: cachedRefCounts,
     });
     Editor.Message.send('framework-plugin', 'set-i18n-data', payload);
+    // 同步通知所有 Inspector 数据已变更，让其刷新本地快照
+    notifyI18nDataChanged();
 }
 function sendI18nStatus(text, color = '#888') {
     Editor.Message.send('framework-plugin', 'set-i18n-status', JSON.stringify({ text, color }));
@@ -2359,6 +2379,34 @@ exports.methods = {
             i18nSources = scanI18nSources();
         }
         return extractI18nLanguages(i18nSources);
+    },
+    /**
+     * 获取 i18n 完整快照（供 Inspector 一次性拉取，避免每次渲染都异步查询）
+     * 返回结构：{ allTranslations: {fullKey: {lang: text}}, languages, primaryLang, version }
+     * version 用于 Inspector 检测数据变化（每次写入后递增）
+     */
+    async i18nGetSnapshot() {
+        if (i18nSources.length === 0) {
+            loadI18nConfig();
+            i18nSources = scanI18nSources();
+        }
+        const allTranslations = {};
+        for (const source of i18nSources) {
+            for (const [ns, keys] of Object.entries(source.data)) {
+                for (const [key, translations] of Object.entries(keys)) {
+                    const fullKey = `${ns}.${key}`;
+                    if (!allTranslations[fullKey]) {
+                        allTranslations[fullKey] = Object.assign({}, translations);
+                    }
+                }
+            }
+        }
+        return {
+            allTranslations,
+            languages: extractI18nLanguages(i18nSources),
+            primaryLang: i18nPrimaryLang,
+            version: i18nDataVersion,
+        };
     },
     /** 通知 i18n 面板进入选择模式（从 Inspector 触发） */
     i18nEnterPickMode(currentKey) {

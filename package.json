@@ -776,6 +776,9 @@
       "i18n-get-languages": {
         "methods": ["i18nGetLanguages"]
       },
+      "i18n-get-snapshot": {
+        "methods": ["i18nGetSnapshot"]
+      },
       "i18n-enter-pick-mode": {
         "methods": ["i18nEnterPickMode"]
       },
