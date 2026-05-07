@@ -184,7 +184,8 @@
       "section": {
         "node": {
           "I18nLabel": "./dist/inspectors/i18n-label.js",
-          "I18nSprite": "./dist/inspectors/i18n-sprite.js"
+          "I18nSprite": "./dist/inspectors/i18n-sprite.js",
+          "I18nEditBox": "./dist/inspectors/i18n-editbox.js"
         }
       }
     },

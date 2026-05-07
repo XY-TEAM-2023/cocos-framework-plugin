@@ -165,7 +165,8 @@ function getI18nTextSync(key: string): string {
 }
 
 /**
- * 扫描当前场景中所有 I18nLabel + cc.Label 节点，把翻译文本同步到 Label.string
+ * 扫描当前场景中所有 I18nLabel + cc.Label 以及 I18nEditBox + cc.EditBox 节点，
+ * 把翻译文本同步到 Label.string / EditBox.placeholder
  *
  * 触发时机：scene:ready 广播（场景打开/重新加载完成）
  * 仅修改编辑器内场景内存表现，不会保存到磁盘文件，避免污染 prefab/scene
@@ -193,7 +194,8 @@ async function syncAllI18nLabelsInScene(): Promise<void> {
         };
         collect(tree);
 
-        let synced = 0;
+        let syncedLabel = 0;
+        let syncedEditBox = 0;
         for (const uuid of uuids) {
             try {
                 // @ts-ignore
@@ -201,36 +203,60 @@ async function syncAllI18nLabelsInScene(): Promise<void> {
                 if (!dump?.__comps__) continue;
 
                 let labelIdx = -1;
-                let i18nKey = '';
+                let editBoxIdx = -1;
+                let labelKey = '';
+                let editBoxKey = '';
                 for (let i = 0; i < dump.__comps__.length; i++) {
                     const comp = dump.__comps__[i];
                     if (comp?.type === 'cc.Label') labelIdx = i;
-                    else if (comp?.type === 'I18nLabel') i18nKey = comp.value?.key?.value || '';
+                    else if (comp?.type === 'cc.EditBox') editBoxIdx = i;
+                    else if (comp?.type === 'I18nLabel') labelKey = comp.value?.key?.value || '';
+                    else if (comp?.type === 'I18nEditBox') editBoxKey = comp.value?.key?.value || '';
                 }
 
-                if (labelIdx < 0 || !i18nKey) continue;
+                // I18nLabel → Label.string
+                if (labelIdx >= 0 && labelKey) {
+                    const text = getI18nTextSync(labelKey);
+                    if (text && text !== labelKey) {
+                        const currentValue = dump.__comps__[labelIdx]?.value?.string?.value;
+                        if (currentValue !== text) {
+                            // @ts-ignore
+                            await Editor.Message.request('scene', 'set-property', {
+                                uuid,
+                                path: `__comps__.${labelIdx}.string`,
+                                dump: { type: 'cc.String', value: text },
+                            });
+                            syncedLabel++;
+                        }
+                    }
+                }
 
-                const text = getI18nTextSync(i18nKey);
-                if (!text || text === i18nKey) continue;
-
-                // 已是翻译文本则跳过，避免重复 set-property
-                const currentValue = dump.__comps__[labelIdx]?.value?.string?.value;
-                if (currentValue === text) continue;
-
-                // @ts-ignore
-                await Editor.Message.request('scene', 'set-property', {
-                    uuid,
-                    path: `__comps__.${labelIdx}.string`,
-                    dump: { type: 'cc.String', value: text },
-                });
-                synced++;
+                // I18nEditBox → EditBox.placeholder
+                if (editBoxIdx >= 0 && editBoxKey) {
+                    const text = getI18nTextSync(editBoxKey);
+                    if (text && text !== editBoxKey) {
+                        const currentValue = dump.__comps__[editBoxIdx]?.value?.placeholder?.value;
+                        if (currentValue !== text) {
+                            // @ts-ignore
+                            await Editor.Message.request('scene', 'set-property', {
+                                uuid,
+                                path: `__comps__.${editBoxIdx}.placeholder`,
+                                dump: { type: 'cc.String', value: text },
+                            });
+                            syncedEditBox++;
+                        }
+                    }
+                }
             } catch {
                 // 单节点失败忽略
             }
         }
 
-        if (synced > 0) {
-            console.log(`[i18n] 场景已同步 ${synced} 个 I18nLabel 翻译到 Label.string`);
+        if (syncedLabel > 0) {
+            console.log(`[i18n] 场景已同步 ${syncedLabel} 个 I18nLabel 翻译到 Label.string`);
+        }
+        if (syncedEditBox > 0) {
+            console.log(`[i18n] 场景已同步 ${syncedEditBox} 个 I18nEditBox 翻译到 EditBox.placeholder`);
         }
     } catch (e) {
         console.warn('[i18n] syncAllI18nLabelsInScene 失败:', e);

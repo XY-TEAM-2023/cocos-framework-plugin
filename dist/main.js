@@ -152,14 +152,15 @@ function getI18nTextSync(key) {
     return key;
 }
 /**
- * 扫描当前场景中所有 I18nLabel + cc.Label 节点，把翻译文本同步到 Label.string
+ * 扫描当前场景中所有 I18nLabel + cc.Label 以及 I18nEditBox + cc.EditBox 节点，
+ * 把翻译文本同步到 Label.string / EditBox.placeholder
  *
  * 触发时机：scene:ready 广播（场景打开/重新加载完成）
  * 仅修改编辑器内场景内存表现，不会保存到磁盘文件，避免污染 prefab/scene
  */
 let syncing = false;
 async function syncAllI18nLabelsInScene() {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     if (syncing)
         return;
     syncing = true;
@@ -182,7 +183,8 @@ async function syncAllI18nLabelsInScene() {
             }
         };
         collect(tree);
-        let synced = 0;
+        let syncedLabel = 0;
+        let syncedEditBox = 0;
         for (const uuid of uuids) {
             try {
                 // @ts-ignore
@@ -190,37 +192,62 @@ async function syncAllI18nLabelsInScene() {
                 if (!(dump === null || dump === void 0 ? void 0 : dump.__comps__))
                     continue;
                 let labelIdx = -1;
-                let i18nKey = '';
+                let editBoxIdx = -1;
+                let labelKey = '';
+                let editBoxKey = '';
                 for (let i = 0; i < dump.__comps__.length; i++) {
                     const comp = dump.__comps__[i];
                     if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.Label')
                         labelIdx = i;
+                    else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.EditBox')
+                        editBoxIdx = i;
                     else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'I18nLabel')
-                        i18nKey = ((_b = (_a = comp.value) === null || _a === void 0 ? void 0 : _a.key) === null || _b === void 0 ? void 0 : _b.value) || '';
+                        labelKey = ((_b = (_a = comp.value) === null || _a === void 0 ? void 0 : _a.key) === null || _b === void 0 ? void 0 : _b.value) || '';
+                    else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'I18nEditBox')
+                        editBoxKey = ((_d = (_c = comp.value) === null || _c === void 0 ? void 0 : _c.key) === null || _d === void 0 ? void 0 : _d.value) || '';
                 }
-                if (labelIdx < 0 || !i18nKey)
-                    continue;
-                const text = getI18nTextSync(i18nKey);
-                if (!text || text === i18nKey)
-                    continue;
-                // 已是翻译文本则跳过，避免重复 set-property
-                const currentValue = (_e = (_d = (_c = dump.__comps__[labelIdx]) === null || _c === void 0 ? void 0 : _c.value) === null || _d === void 0 ? void 0 : _d.string) === null || _e === void 0 ? void 0 : _e.value;
-                if (currentValue === text)
-                    continue;
-                // @ts-ignore
-                await Editor.Message.request('scene', 'set-property', {
-                    uuid,
-                    path: `__comps__.${labelIdx}.string`,
-                    dump: { type: 'cc.String', value: text },
-                });
-                synced++;
+                // I18nLabel → Label.string
+                if (labelIdx >= 0 && labelKey) {
+                    const text = getI18nTextSync(labelKey);
+                    if (text && text !== labelKey) {
+                        const currentValue = (_g = (_f = (_e = dump.__comps__[labelIdx]) === null || _e === void 0 ? void 0 : _e.value) === null || _f === void 0 ? void 0 : _f.string) === null || _g === void 0 ? void 0 : _g.value;
+                        if (currentValue !== text) {
+                            // @ts-ignore
+                            await Editor.Message.request('scene', 'set-property', {
+                                uuid,
+                                path: `__comps__.${labelIdx}.string`,
+                                dump: { type: 'cc.String', value: text },
+                            });
+                            syncedLabel++;
+                        }
+                    }
+                }
+                // I18nEditBox → EditBox.placeholder
+                if (editBoxIdx >= 0 && editBoxKey) {
+                    const text = getI18nTextSync(editBoxKey);
+                    if (text && text !== editBoxKey) {
+                        const currentValue = (_k = (_j = (_h = dump.__comps__[editBoxIdx]) === null || _h === void 0 ? void 0 : _h.value) === null || _j === void 0 ? void 0 : _j.placeholder) === null || _k === void 0 ? void 0 : _k.value;
+                        if (currentValue !== text) {
+                            // @ts-ignore
+                            await Editor.Message.request('scene', 'set-property', {
+                                uuid,
+                                path: `__comps__.${editBoxIdx}.placeholder`,
+                                dump: { type: 'cc.String', value: text },
+                            });
+                            syncedEditBox++;
+                        }
+                    }
+                }
             }
-            catch (_f) {
+            catch (_l) {
                 // 单节点失败忽略
             }
         }
-        if (synced > 0) {
-            console.log(`[i18n] 场景已同步 ${synced} 个 I18nLabel 翻译到 Label.string`);
+        if (syncedLabel > 0) {
+            console.log(`[i18n] 场景已同步 ${syncedLabel} 个 I18nLabel 翻译到 Label.string`);
+        }
+        if (syncedEditBox > 0) {
+            console.log(`[i18n] 场景已同步 ${syncedEditBox} 个 I18nEditBox 翻译到 EditBox.placeholder`);
         }
     }
     catch (e) {
