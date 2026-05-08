@@ -157,6 +157,8 @@ export const template = `
     </ui-prop>
     <div id="preview-list" class="preview-list"></div>
     <div id="param-section" class="param-section"></div>
+    <!-- labels 字段交给引擎默认渲染（多 Label 拖拽） -->
+    <ui-prop id="labels-prop" type="dump"></ui-prop>
 </div>
 `;
 
@@ -324,6 +326,7 @@ export const $ = {
     'btn-pick-key': '#btn-pick-key',
     'preview-list': '#preview-list',
     'param-section': '#param-section',
+    'labels-prop': '#labels-prop',
 };
 
 // ==================== 生命周期 ====================
@@ -394,18 +397,29 @@ export function update(this: any, dump: any) {
         // @ts-ignore
         const nodeUuids = Editor.Selection.getSelected('node');
         const nodeUuid = nodeUuids?.[0] || '';
-        const sig = `${nodeUuid}|${dump.path || ''}|${key}|v${snapshot.version}`;
+        const labelsDump = dump.value.labels;
+        const labelsSig = collectLabelsSig(labelsDump);
+        const sig = `${nodeUuid}|${dump.path || ''}|${key}|${labelsSig}|v${snapshot.version}`;
         if (sig !== inst.lastAutoSyncSig) {
             inst.lastAutoSyncSig = sig;
             if (inst.autoSyncTimer) clearTimeout(inst.autoSyncTimer);
             inst.autoSyncTimer = setTimeout(() => {
                 inst.autoSyncTimer = null;
-                void syncLabelString(nodeUuid, dump.path || '', key);
+                void syncLabelString(nodeUuid, dump.path || '', key, labelsDump);
             }, 200);
         }
     } else {
         inst.lastAutoSyncSig = '';
     }
+}
+
+/** 把 labels 数组里所有 Label 引用的 component uuid 拼成签名 */
+function collectLabelsSig(labelsDump: any): string {
+    if (!labelsDump?.value || !Array.isArray(labelsDump.value)) return '';
+    return labelsDump.value
+        .map((it: any) => it?.value?.uuid || '')
+        .filter(Boolean)
+        .join(',');
 }
 
 export function close(this: any) {
@@ -448,6 +462,26 @@ function renderAll(self: any) {
     // 自动同步占位符到 paramList（基于当前 key 的占位符）
     syncDetectedParams(self);
     renderParamSection(self);
+    // labels 字段：用引擎默认 UI 渲染（拖拽 Label 列表）
+    renderLabelsProp(self);
+}
+
+/** 把 dump.value.labels 渲染到 ui-prop[type=dump] 上 */
+function renderLabelsProp(self: any) {
+    const inst = getInst(self);
+    const labelsDump = inst.dump?.value?.labels;
+    const propEl = self.$['labels-prop'];
+    if (!propEl) return;
+    if (!labelsDump) {
+        propEl.style.display = 'none';
+        return;
+    }
+    propEl.style.display = '';
+    try {
+        propEl.render(labelsDump);
+    } catch (e) {
+        console.warn(`${LOG_TAG} render labels-prop 失败:`, e);
+    }
 }
 
 function renderPreview(self: any, key: string) {
@@ -807,39 +841,112 @@ async function commitProperty(self: any, propertyName: string): Promise<void> {
 
 /**
  * 同步 Label.string；纯闭包（不读 inst/currentDump）
- * 入参：发起时的 nodeUuid + I18nLabel 组件路径 + key
+ * 同步两类目标：
+ *   1) 自身节点上的 Label 组件（如有）—— 用 nodeUuid + __comps__.N.string 路径
+ *   2) labels 数组里拖入的额外 Label 引用 —— 用 component uuid + 'string' 路径
+ * 自身 Label 的 component uuid 会与 labels 数组去重，避免双写
  */
-async function syncLabelString(nodeUuid: string, i18nCompPath: string, key: string): Promise<void> {
-    if (!nodeUuid || !i18nCompPath || !key) return;
+async function syncLabelString(nodeUuid: string, _i18nCompPath: string, key: string, labelsDump: any): Promise<void> {
+    if (!key) return;
     const text = getPrimaryText(key);
     if (!text || text === key) return;
 
+    const writtenCompUuids = new Set<string>();
+
+    // 1) 自身节点 Label
+    if (nodeUuid) {
+        try {
+            // @ts-ignore
+            const nodeDump = await Editor.Message.request('scene', 'query-node', nodeUuid);
+            if (nodeDump?.__comps__) {
+                for (let i = 0; i < nodeDump.__comps__.length; i++) {
+                    const c = nodeDump.__comps__[i];
+                    if (c?.type !== 'cc.Label') continue;
+                    const compUuid: string = c?.value?.uuid?.value || '';
+                    const currentVal = c?.value?.string?.value;
+                    if (currentVal !== text) {
+                        try {
+                            // @ts-ignore
+                            await Editor.Message.request('scene', 'set-property', {
+                                uuid: nodeUuid,
+                                path: `__comps__.${i}.string`,
+                                dump: { type: 'cc.String', value: text },
+                            });
+                        } catch (e) {
+                            console.warn(`${LOG_TAG} syncLabelString 自身 Label set-property 失败:`, e);
+                        }
+                    }
+                    if (compUuid) writtenCompUuids.add(compUuid);
+                    break; // 只取第一个 cc.Label
+                }
+            }
+        } catch (e) {
+            console.warn(`${LOG_TAG} syncLabelString 查询自身节点失败:`, e);
+        }
+    }
+
+    // 2) labels 数组里的 Label 引用：通过 query-component 反查节点 + 组件 index，
+    //    再用 nodeUuid + __comps__.N.string 路径写（set-property 的 uuid 参数只接受节点 uuid）
+    if (labelsDump?.value && Array.isArray(labelsDump.value)) {
+        if (labelsDump.value.length > 0) {
+            console.log(`${LOG_TAG} 同步 labels 数组, 共 ${labelsDump.value.length} 项, 首项=`, labelsDump.value[0]);
+        }
+        for (const item of labelsDump.value) {
+            const compUuid: string = item?.value?.uuid || '';
+            if (!compUuid) {
+                console.warn(`${LOG_TAG} labels 数组项拿不到 uuid, item=`, item);
+                continue;
+            }
+            if (writtenCompUuids.has(compUuid)) continue;
+            writtenCompUuids.add(compUuid);
+            await writeLabelStringByCompUuid(compUuid, text);
+        }
+    }
+}
+
+/** 通过组件 uuid 反查节点 + 组件 index，写入 string 属性 */
+async function writeLabelStringByCompUuid(componentUuid: string, text: string): Promise<void> {
     try {
+        // @ts-ignore
+        const compDump = await Editor.Message.request('scene', 'query-component', componentUuid);
+        if (!compDump) {
+            console.warn(`${LOG_TAG} query-component 返回空, compUuid=${componentUuid}`);
+            return;
+        }
+        // 不同 Cocos 版本 node 字段位置略有差异，做几个 fallback
+        const nodeUuid: string =
+            compDump?.node?.value?.uuid ||
+            compDump?.node?.uuid ||
+            compDump?.value?.node?.value?.uuid ||
+            '';
+        if (!nodeUuid) {
+            console.warn(`${LOG_TAG} 从 compDump 拿不到 nodeUuid, compUuid=${componentUuid}, dump=`, compDump);
+            return;
+        }
+
         // @ts-ignore
         const nodeDump = await Editor.Message.request('scene', 'query-node', nodeUuid);
         if (!nodeDump?.__comps__) return;
 
-        let labelCompPath = '';
         for (let i = 0; i < nodeDump.__comps__.length; i++) {
-            if (nodeDump.__comps__[i]?.type === 'cc.Label') {
-                labelCompPath = `__comps__.${i}`;
-                break;
-            }
+            const c = nodeDump.__comps__[i];
+            const cUuid: string = c?.value?.uuid?.value || '';
+            if (cUuid !== componentUuid) continue;
+
+            const currentVal = c?.value?.string?.value;
+            if (currentVal === text) return;
+
+            // @ts-ignore
+            await Editor.Message.request('scene', 'set-property', {
+                uuid: nodeUuid,
+                path: `__comps__.${i}.string`,
+                dump: { type: 'cc.String', value: text },
+            });
+            return;
         }
-        if (!labelCompPath) return;
-
-        // 已是目标值时跳过
-        const currentVal = (nodeDump.__comps__ as any[]).find(c => c?.type === 'cc.Label')?.value?.string?.value;
-        if (currentVal === text) return;
-
-        // @ts-ignore
-        await Editor.Message.request('scene', 'set-property', {
-            uuid: nodeUuid,
-            path: `${labelCompPath}.string`,
-            dump: { type: 'cc.String', value: text },
-        });
+        console.warn(`${LOG_TAG} 在节点 ${nodeUuid} 的 __comps__ 中找不到 ${componentUuid}`);
     } catch (e) {
-        console.warn(`${LOG_TAG} syncLabelString 失败:`, e);
+        console.warn(`${LOG_TAG} writeLabelStringByCompUuid(${componentUuid}) 失败:`, e);
     }
 }
 
@@ -939,8 +1046,8 @@ async function applyPickedKey(self: any, key: string): Promise<void> {
         }
     }
 
-    // 立即同步 Label.string
-    await syncLabelString(nodeUuid, dump.path || '', key);
+    // 立即同步 Label.string（含 labels 数组里的额外 Label）
+    await syncLabelString(nodeUuid, dump.path || '', key, dump.value.labels);
 
     // 立即更新显示（不等下一次 update 触发）
     const keyDisplay = self.$['key-display'] as HTMLElement;

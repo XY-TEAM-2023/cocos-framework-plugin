@@ -160,7 +160,7 @@ function getI18nTextSync(key) {
  */
 let syncing = false;
 async function syncAllI18nLabelsInScene() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     if (syncing)
         return;
     syncing = true;
@@ -183,64 +183,149 @@ async function syncAllI18nLabelsInScene() {
             }
         };
         collect(tree);
-        let syncedLabel = 0;
-        let syncedEditBox = 0;
+        // ==================== 第一轮：query 所有节点 dump + 建立 cc.Label 索引 ====================
+        // labelMap: cc.Label 组件 uuid → 它所在的 nodeUuid + compIdx + 当前 string
+        const labelMap = new Map();
+        // 节点 dump 缓存，避免第二轮重复 query
+        const dumpCache = new Map();
+        // 收集到的 I18nLabel 任务：{nodeUuid, key, labelsCompUuids, selfLabelIdx}
+        const labelTasks = [];
+        // I18nEditBox 任务
+        const editBoxTasks = [];
         for (const uuid of uuids) {
             try {
                 // @ts-ignore
                 const dump = await Editor.Message.request('scene', 'query-node', uuid);
                 if (!(dump === null || dump === void 0 ? void 0 : dump.__comps__))
                     continue;
-                let labelIdx = -1;
+                dumpCache.set(uuid, dump);
+                let selfLabelIdx = -1;
                 let editBoxIdx = -1;
                 let labelKey = '';
                 let editBoxKey = '';
+                let labelsCompUuids = [];
                 for (let i = 0; i < dump.__comps__.length; i++) {
                     const comp = dump.__comps__[i];
-                    if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.Label')
-                        labelIdx = i;
+                    if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.Label') {
+                        selfLabelIdx = i;
+                        // 兼容多种 cocos 版本下 component uuid 的位置
+                        const compUuid = ((_b = (_a = comp === null || comp === void 0 ? void 0 : comp.value) === null || _a === void 0 ? void 0 : _a.uuid) === null || _b === void 0 ? void 0 : _b.value) ||
+                            (comp === null || comp === void 0 ? void 0 : comp.uuid) ||
+                            ((_c = comp === null || comp === void 0 ? void 0 : comp.value) === null || _c === void 0 ? void 0 : _c.uuid) ||
+                            '';
+                        const currentString = ((_e = (_d = comp === null || comp === void 0 ? void 0 : comp.value) === null || _d === void 0 ? void 0 : _d.string) === null || _e === void 0 ? void 0 : _e.value) || '';
+                        if (compUuid) {
+                            labelMap.set(compUuid, { nodeUuid: uuid, compIdx: i, currentString });
+                        }
+                        else {
+                            console.warn(`[i18n] cc.Label 拿不到 compUuid, node=${uuid}, comp dump keys=`, Object.keys(comp || {}), 'value keys=', Object.keys((comp === null || comp === void 0 ? void 0 : comp.value) || {}));
+                        }
+                    }
                     else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'cc.EditBox')
                         editBoxIdx = i;
-                    else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'I18nLabel')
-                        labelKey = ((_b = (_a = comp.value) === null || _a === void 0 ? void 0 : _a.key) === null || _b === void 0 ? void 0 : _b.value) || '';
+                    else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'I18nLabel') {
+                        labelKey = ((_g = (_f = comp.value) === null || _f === void 0 ? void 0 : _f.key) === null || _g === void 0 ? void 0 : _g.value) || '';
+                        const labelsArr = (_j = (_h = comp.value) === null || _h === void 0 ? void 0 : _h.labels) === null || _j === void 0 ? void 0 : _j.value;
+                        if (Array.isArray(labelsArr)) {
+                            labelsCompUuids = labelsArr
+                                .map((it) => {
+                                var _a;
+                                // 兼容多种 cocos 版本下数组项 uuid 的位置
+                                return ((_a = it === null || it === void 0 ? void 0 : it.value) === null || _a === void 0 ? void 0 : _a.uuid) || (it === null || it === void 0 ? void 0 : it.uuid) || (it === null || it === void 0 ? void 0 : it.value) || '';
+                            })
+                                .filter(Boolean);
+                            if (labelsArr.length > 0 && labelsCompUuids.length === 0) {
+                                console.warn(`[i18n] I18nLabel.labels 数组拿不到任何 uuid, node=${uuid}, labelsArr 首项=`, labelsArr[0]);
+                            }
+                            else if (labelsArr.length > 0) {
+                                console.log(`[i18n] I18nLabel(node=${uuid}) labels 数组共 ${labelsArr.length} 项, compUuids=${labelsCompUuids.join(',')}, 首项 dump=`, labelsArr[0]);
+                            }
+                        }
+                    }
                     else if ((comp === null || comp === void 0 ? void 0 : comp.type) === 'I18nEditBox')
-                        editBoxKey = ((_d = (_c = comp.value) === null || _c === void 0 ? void 0 : _c.key) === null || _d === void 0 ? void 0 : _d.value) || '';
+                        editBoxKey = ((_l = (_k = comp.value) === null || _k === void 0 ? void 0 : _k.key) === null || _l === void 0 ? void 0 : _l.value) || '';
                 }
-                // I18nLabel → Label.string
-                if (labelIdx >= 0 && labelKey) {
-                    const text = getI18nTextSync(labelKey);
-                    if (text && text !== labelKey) {
-                        const currentValue = (_g = (_f = (_e = dump.__comps__[labelIdx]) === null || _e === void 0 ? void 0 : _e.value) === null || _f === void 0 ? void 0 : _f.string) === null || _g === void 0 ? void 0 : _g.value;
-                        if (currentValue !== text) {
-                            // @ts-ignore
-                            await Editor.Message.request('scene', 'set-property', {
-                                uuid,
-                                path: `__comps__.${labelIdx}.string`,
-                                dump: { type: 'cc.String', value: text },
-                            });
-                            syncedLabel++;
-                        }
-                    }
+                if (labelKey) {
+                    labelTasks.push({ nodeUuid: uuid, key: labelKey, labelsCompUuids, selfLabelIdx });
                 }
-                // I18nEditBox → EditBox.placeholder
-                if (editBoxIdx >= 0 && editBoxKey) {
-                    const text = getI18nTextSync(editBoxKey);
-                    if (text && text !== editBoxKey) {
-                        const currentValue = (_k = (_j = (_h = dump.__comps__[editBoxIdx]) === null || _h === void 0 ? void 0 : _h.value) === null || _j === void 0 ? void 0 : _j.placeholder) === null || _k === void 0 ? void 0 : _k.value;
-                        if (currentValue !== text) {
-                            // @ts-ignore
-                            await Editor.Message.request('scene', 'set-property', {
-                                uuid,
-                                path: `__comps__.${editBoxIdx}.placeholder`,
-                                dump: { type: 'cc.String', value: text },
-                            });
-                            syncedEditBox++;
-                        }
-                    }
+                if (editBoxKey && editBoxIdx >= 0) {
+                    const currentValue = ((_p = (_o = (_m = dump.__comps__[editBoxIdx]) === null || _m === void 0 ? void 0 : _m.value) === null || _o === void 0 ? void 0 : _o.placeholder) === null || _p === void 0 ? void 0 : _p.value) || '';
+                    editBoxTasks.push({ nodeUuid: uuid, key: editBoxKey, editBoxIdx, currentValue });
                 }
             }
-            catch (_l) {
-                // 单节点失败忽略
+            catch (_t) {
+                // 单节点 query 失败忽略
+            }
+        }
+        // ==================== 第二轮：执行写入 ====================
+        let syncedLabel = 0;
+        let syncedEditBox = 0;
+        // 收集所有要写入的 (nodeUuid, compIdx) → text，去重（避免同一 Label 被多个 I18nLabel 重复写）
+        const writeQueue = new Map();
+        for (const task of labelTasks) {
+            const text = getI18nTextSync(task.key);
+            if (!text || text === task.key)
+                continue;
+            const targets = [];
+            // 自身节点 Label（如有）
+            if (task.selfLabelIdx >= 0) {
+                const dump = dumpCache.get(task.nodeUuid);
+                const c = (_q = dump === null || dump === void 0 ? void 0 : dump.__comps__) === null || _q === void 0 ? void 0 : _q[task.selfLabelIdx];
+                targets.push({
+                    nodeUuid: task.nodeUuid,
+                    compIdx: task.selfLabelIdx,
+                    currentString: ((_s = (_r = c === null || c === void 0 ? void 0 : c.value) === null || _r === void 0 ? void 0 : _r.string) === null || _s === void 0 ? void 0 : _s.value) || '',
+                });
+            }
+            // labels 数组里的 Label
+            for (const compUuid of task.labelsCompUuids) {
+                const loc = labelMap.get(compUuid);
+                if (!loc) {
+                    console.warn(`[i18n] 找不到 label 组件 uuid=${compUuid}（来自节点 ${task.nodeUuid} 的 I18nLabel.labels），labelMap 中已收录 ${labelMap.size} 个 cc.Label，前 3 个 key=${Array.from(labelMap.keys()).slice(0, 3).join(',')}`);
+                    continue;
+                }
+                targets.push(loc);
+            }
+            for (const t of targets) {
+                if (t.currentString === text)
+                    continue;
+                const queueKey = `${t.nodeUuid}#${t.compIdx}`;
+                writeQueue.set(queueKey, { nodeUuid: t.nodeUuid, compIdx: t.compIdx, text });
+            }
+        }
+        // 执行 Label 写入
+        for (const w of writeQueue.values()) {
+            try {
+                // @ts-ignore
+                await Editor.Message.request('scene', 'set-property', {
+                    uuid: w.nodeUuid,
+                    path: `__comps__.${w.compIdx}.string`,
+                    dump: { type: 'cc.String', value: w.text },
+                });
+                syncedLabel++;
+            }
+            catch (e) {
+                console.warn(`[i18n] 写 Label.string 失败 node=${w.nodeUuid} idx=${w.compIdx}:`, e);
+            }
+        }
+        // 执行 EditBox 写入
+        for (const task of editBoxTasks) {
+            const text = getI18nTextSync(task.key);
+            if (!text || text === task.key)
+                continue;
+            if (task.currentValue === text)
+                continue;
+            try {
+                // @ts-ignore
+                await Editor.Message.request('scene', 'set-property', {
+                    uuid: task.nodeUuid,
+                    path: `__comps__.${task.editBoxIdx}.placeholder`,
+                    dump: { type: 'cc.String', value: text },
+                });
+                syncedEditBox++;
+            }
+            catch (e) {
+                console.warn(`[i18n] 写 EditBox.placeholder 失败 node=${task.nodeUuid}:`, e);
             }
         }
         if (syncedLabel > 0) {

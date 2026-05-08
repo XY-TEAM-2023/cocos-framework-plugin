@@ -371,6 +371,15 @@ function fillLangOptions(select: HTMLSelectElement, currentLang: string) {
         select.appendChild(opt);
         return;
     }
+    // 默认 / fallback 槽位（lang=""）：当 currentLang/primaryLang 都未命中时，运行时会用这一项
+    // 显式提供该选项，避免 currentLang="" 时 <select> 默认选中第一项造成"假装选了主语言"的视觉假象
+    {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '（默认 / fallback）';
+        if (currentLang === '') opt.selected = true;
+        select.appendChild(opt);
+    }
     for (const lang of langs) {
         const opt = document.createElement('option');
         opt.value = lang;
