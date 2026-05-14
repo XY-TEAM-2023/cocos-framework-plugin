@@ -38,6 +38,7 @@ exports.template = `
             <span class="toolbar-title">国际化资源管理</span>
         </div>
         <div id="toolbar-right">
+            <button id="btn-ai-config" class="tool-btn" title="配置 AI 翻译供应商">配置AI翻译服务</button>
             <button id="btn-lang-manage" class="tool-btn" title="语言管理">语言管理</button>
         </div>
     </div>
@@ -67,6 +68,108 @@ exports.template = `
             </div>
             <div class="dialog-hint">选择 Bundle 目录，将自动创建 i18n/i18n.json 文件并切换到该数据源</div>
             <div id="available-games-list" class="dialog-body"></div>
+        </div>
+    </div>
+
+    <!-- AI 翻译供应商配置弹窗 -->
+    <div id="ai-config-overlay" class="overlay hidden">
+        <div class="overlay-dialog ai-config-dialog">
+            <div class="dialog-header">
+                <span>配置 AI 翻译供应商</span>
+                <button id="btn-close-ai-dialog" class="dialog-close">✕</button>
+            </div>
+            <div class="dialog-hint">使用 OpenAI 兼容协议（/v1/models、/v1/chat/completions），适用于 OpenAI / DeepSeek / 硅基流动 / Moonshot / 智谱 / 通义 / 本地 Ollama 等</div>
+            <div class="ai-config-body">
+                <div class="ai-field">
+                    <label class="ai-field-label">供应商地址 (Base URL)</label>
+                    <input id="ai-base-url" type="text" class="ai-input" placeholder="如 https://api.openai.com/v1">
+                    <div class="ai-field-hint">不要带尾部斜杠，必须含 /v1（或同等版本路径）</div>
+                </div>
+                <div class="ai-field">
+                    <label class="ai-field-label">API Key</label>
+                    <input id="ai-api-key" type="password" class="ai-input" placeholder="sk-...">
+                    <div class="ai-field-hint">本地保存到项目根 .ai-translate-config.json，自动加入 .gitignore</div>
+                </div>
+                <div class="ai-field">
+                    <label class="ai-field-label">模型</label>
+                    <div class="ai-model-row">
+                        <select id="ai-model-select" class="ai-input ai-select">
+                            <option value="">— 请先拉取模型列表 —</option>
+                        </select>
+                        <button id="btn-fetch-models" class="ai-fetch-btn">拉取模型列表</button>
+                    </div>
+                    <div id="ai-model-status" class="ai-field-hint"></div>
+                </div>
+                <div class="ai-field">
+                    <label class="ai-field-label">翻译提示词</label>
+                    <textarea id="ai-prompt" class="ai-input ai-textarea" rows="8" placeholder="提示词模板..."></textarea>
+                    <div class="ai-field-hint">支持占位符：{sourceLang} 源语言, {targetLang} 目标语言, {text} 待翻译文本</div>
+                </div>
+                <div class="ai-field-row">
+                    <div class="ai-field" style="flex:1;">
+                        <label class="ai-field-label">超时（秒）</label>
+                        <input id="ai-timeout-sec" type="number" min="5" max="600" step="5" class="ai-input" placeholder="60">
+                        <div class="ai-field-hint">单次请求最长等待，默认 60s</div>
+                    </div>
+                    <div class="ai-field" style="flex:1;">
+                        <label class="ai-field-label">失败重试次数</label>
+                        <input id="ai-retries" type="number" min="0" max="5" step="1" class="ai-input" placeholder="0">
+                        <div class="ai-field-hint">网络错误/HTTP 错误后再试 N 次（取消不会重试）</div>
+                    </div>
+                </div>
+                <div class="ai-field">
+                    <button id="btn-test-connection" class="ai-fetch-btn" style="align-self:flex-start;">🔌 测试连接</button>
+                    <div id="ai-test-status" class="ai-field-hint"></div>
+                </div>
+            </div>
+            <div class="dialog-footer ai-config-footer">
+                <div class="actions-spacer"></div>
+                <button id="btn-cancel-ai-config" class="action-btn ghost">取消</button>
+                <button id="btn-save-ai-config" class="action-btn primary">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 覆盖确认弹窗 -->
+    <div id="overwrite-confirm-overlay" class="overlay hidden">
+        <div class="overlay-dialog overwrite-confirm-dialog">
+            <div class="dialog-header">
+                <span>确认覆盖已有翻译</span>
+                <button id="btn-close-overwrite-dialog" class="dialog-close">✕</button>
+            </div>
+            <div class="dialog-hint" id="overwrite-confirm-hint">检测到部分目标语言已有翻译，是否覆盖？</div>
+            <div class="dialog-footer">
+                <div class="actions-spacer"></div>
+                <button id="btn-overwrite-cancel" class="action-btn ghost">取消</button>
+                <button id="btn-overwrite-skip" class="action-btn ghost">仅填空白</button>
+                <button id="btn-overwrite-all" class="action-btn primary">覆盖全部</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 调整描述弹窗 -->
+    <div id="adjust-overlay" class="overlay hidden">
+        <div class="overlay-dialog adjust-dialog">
+            <div class="dialog-header">
+                <span id="adjust-dialog-title">调整翻译</span>
+                <button id="btn-close-adjust-dialog" class="dialog-close">✕</button>
+            </div>
+            <div class="dialog-hint">基于当前译文 + 你的补充描述，AI 会重新生成这条翻译</div>
+            <div class="ai-config-body">
+                <div class="ai-field">
+                    <label class="ai-field-label">当前译文</label>
+                    <div id="adjust-current-text" class="adjust-current-text"></div>
+                </div>
+                <div class="ai-field">
+                    <label class="ai-field-label">补充描述</label>
+                    <textarea id="adjust-instruction" class="ai-input ai-textarea" rows="4" placeholder="例：再短一点 / 换种说法 / 更口语化 / 加上感叹号"></textarea>
+                </div>
+            </div>
+            <div class="dialog-footer ai-config-footer">
+                <div class="actions-spacer"></div>
+                <button id="btn-adjust-cancel" class="action-btn ghost">取消</button>
+                <button id="btn-adjust-submit" class="action-btn primary">重新生成</button>
+            </div>
         </div>
     </div>
 
@@ -124,6 +227,12 @@ exports.template = `
                 <button id="btn-save-key" class="action-btn primary" disabled>保存</button>
             </div>
         </div>
+    </div>
+
+    <!-- AI 翻译进行中浮条（右下角） -->
+    <div id="ai-cancel-bar" class="ai-cancel-bar hidden">
+        <span id="ai-cancel-text">正在调用 AI...</span>
+        <button id="btn-cancel-ai" class="ai-cancel-btn">取消</button>
     </div>
 
     <!-- 选择模式操作条（覆盖在底部状态栏上方） -->
@@ -242,6 +351,64 @@ exports.style = `
 }
 .game-item-btn:hover { background: #0098ff; }
 .dialog-empty { padding: 30px 18px; text-align: center; color: #555; font-size: 13px; }
+
+/* AI 翻译配置弹窗 */
+.ai-config-dialog { width: 560px; max-height: 90%; }
+.ai-config-body {
+    flex: 1; overflow-y: auto; padding: 16px 20px;
+    display: flex; flex-direction: column; gap: 14px;
+}
+.ai-field { display: flex; flex-direction: column; gap: 4px; }
+.ai-field-label { font-size: 12px; color: #9cdcfe; font-weight: 600; }
+.ai-field-hint { font-size: 11px; color: #666; line-height: 1.4; }
+.ai-input {
+    background: #2a2a2a; border: 1px solid #404040; color: #d4d4d4;
+    border-radius: 4px; padding: 7px 10px; font-size: 13px; outline: none;
+    box-sizing: border-box; width: 100%; font-family: inherit;
+}
+.ai-input:focus { border-color: #007ACC; }
+.ai-textarea { resize: vertical; min-height: 120px; line-height: 1.5; font-size: 12px; }
+.ai-model-row { display: flex; gap: 8px; align-items: center; }
+.ai-select { flex: 1; cursor: pointer; }
+.ai-fetch-btn {
+    background: #2a3a4a; border: 1px solid #007ACC; color: #4a9cd6;
+    border-radius: 4px; padding: 7px 14px; font-size: 12px; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+}
+.ai-fetch-btn:hover:not(:disabled) { background: #007ACC; color: #fff; }
+.ai-fetch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ai-config-footer {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-top: 1px solid #2a2a2a;
+}
+.ai-field-row { display: flex; gap: 12px; }
+
+/* 取消翻译浮条 */
+.ai-cancel-bar {
+    position: absolute; bottom: 32px; right: 16px; z-index: 50;
+    display: flex; align-items: center; gap: 8px;
+    background: #1a2a3a; border: 1px solid #007ACC; border-radius: 4px;
+    padding: 6px 12px; font-size: 12px; color: #4a9cd6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.ai-cancel-bar.hidden { display: none; }
+.ai-cancel-btn {
+    background: #3a1a1a; color: #f66; border: 1px solid #4a2a2a;
+    border-radius: 3px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+.ai-cancel-btn:hover { background: #4a2020; color: #f88; }
+
+/* 覆盖确认弹窗 */
+.overwrite-confirm-dialog { width: 480px; }
+
+/* 调整翻译弹窗 */
+.adjust-dialog { width: 520px; max-height: 90%; }
+.adjust-current-text {
+    background: #1a1a1a; border: 1px solid #2a2a2a; color: #aaa;
+    border-radius: 4px; padding: 8px 10px; font-size: 12px;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    max-height: 100px; overflow-y: auto;
+}
 
 /* 三栏内容区 */
 #content-area {
@@ -402,10 +569,22 @@ exports.style = `
     background: #1a2a3a; color: #4a9cd6; font-size: 10px; padding: 1px 6px;
     border-radius: 3px;
 }
+.lang-editor-actions { display: flex; align-items: center; gap: 4px; }
+.lang-editor-action {
+    background: #1a2a3a; border: 1px solid #2a3a4a; color: #4a9cd6;
+    border-radius: 3px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+    line-height: 1.4; white-space: nowrap;
+}
+.lang-editor-action:hover:not(:disabled) { background: #007ACC; color: #fff; border-color: #007ACC; }
+.lang-editor-action:disabled { opacity: 0.4; cursor: not-allowed; }
+.lang-editor-action.loading { opacity: 0.6; cursor: progress; }
 .lang-editor-clear {
     background: none; border: none; color: #555; cursor: pointer; font-size: 11px;
 }
 .lang-editor-clear:hover { color: #aaa; }
+.lang-textarea.translating {
+    background: #102030; opacity: 0.7;
+}
 .lang-textarea {
     width: 100%; box-sizing: border-box; min-height: 60px; resize: vertical;
     background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a;
@@ -508,6 +687,37 @@ exports.$ = {
     'add-source-overlay': '#add-source-overlay',
     'available-games-list': '#available-games-list',
     'btn-close-dialog': '#btn-close-dialog',
+    'btn-ai-config': '#btn-ai-config',
+    'ai-config-overlay': '#ai-config-overlay',
+    'btn-close-ai-dialog': '#btn-close-ai-dialog',
+    'ai-base-url': '#ai-base-url',
+    'ai-api-key': '#ai-api-key',
+    'ai-model-select': '#ai-model-select',
+    'btn-fetch-models': '#btn-fetch-models',
+    'ai-model-status': '#ai-model-status',
+    'ai-prompt': '#ai-prompt',
+    'btn-cancel-ai-config': '#btn-cancel-ai-config',
+    'btn-save-ai-config': '#btn-save-ai-config',
+    'ai-timeout-sec': '#ai-timeout-sec',
+    'ai-retries': '#ai-retries',
+    'btn-test-connection': '#btn-test-connection',
+    'ai-test-status': '#ai-test-status',
+    'ai-cancel-bar': '#ai-cancel-bar',
+    'ai-cancel-text': '#ai-cancel-text',
+    'btn-cancel-ai': '#btn-cancel-ai',
+    'overwrite-confirm-overlay': '#overwrite-confirm-overlay',
+    'overwrite-confirm-hint': '#overwrite-confirm-hint',
+    'btn-close-overwrite-dialog': '#btn-close-overwrite-dialog',
+    'btn-overwrite-cancel': '#btn-overwrite-cancel',
+    'btn-overwrite-skip': '#btn-overwrite-skip',
+    'btn-overwrite-all': '#btn-overwrite-all',
+    'adjust-overlay': '#adjust-overlay',
+    'adjust-dialog-title': '#adjust-dialog-title',
+    'btn-close-adjust-dialog': '#btn-close-adjust-dialog',
+    'adjust-current-text': '#adjust-current-text',
+    'adjust-instruction': '#adjust-instruction',
+    'btn-adjust-cancel': '#btn-adjust-cancel',
+    'btn-adjust-submit': '#btn-adjust-submit',
 };
 // ==================== 渲染 ====================
 /** 获取当前数据源的完整数据 */
@@ -795,7 +1005,11 @@ function renderEditor() {
                     ${esc(lang)}
                     ${isPrimary ? '<span class="lang-editor-badge">主语言</span>' : ''}
                 </span>
-                <button class="lang-editor-clear" data-lang="${esc(lang)}" title="清空此语言的翻译">清空</button>
+                <div class="lang-editor-actions">
+                    <button class="lang-editor-action lang-editor-translate" data-lang="${esc(lang)}" title="用此语言文本翻译填充其他语言">🌐 翻译填充</button>
+                    <button class="lang-editor-action lang-editor-adjust" data-lang="${esc(lang)}" title="基于补充描述,AI 重新生成此语言">✨ 调整</button>
+                    <button class="lang-editor-clear" data-lang="${esc(lang)}" title="清空此语言的翻译">清空</button>
+                </div>
             </div>
             <textarea class="lang-textarea" data-lang="${esc(lang)}" placeholder="输入 ${esc(lang)} 翻译...">${esc(value)}</textarea>
             ${missingHint}
@@ -812,6 +1026,30 @@ function renderEditor() {
             updateVarHints();
             updateDirtyState();
         });
+        // 粘贴时：仅当输入框严格为空时，自动 trim 粘贴文本首尾的空白
+        // 覆盖范围：\s（含全角空格 U+3000、不间断空格 U+00A0、Tab、换行等）+ 零宽字符（U+200B~U+200D、U+FEFF）
+        ta.addEventListener('paste', (e) => {
+            var _a;
+            const target = e.currentTarget;
+            if (target.value !== '')
+                return;
+            const pasteEvent = e;
+            const text = (_a = pasteEvent.clipboardData) === null || _a === void 0 ? void 0 : _a.getData('text');
+            if (!text)
+                return;
+            // \s 已涵盖全角空格 U+3000、不间断空格 U+00A0 等；额外补零宽字符（U+200B~U+200D、U+FEFF）
+            const trimClass = '[\\s\\u200B\\u200C\\u200D\\uFEFF]+';
+            const trimRe = new RegExp('^' + trimClass + '|' + trimClass + '$', 'g');
+            const trimmed = text.replace(trimRe, '');
+            if (trimmed === text)
+                return;
+            pasteEvent.preventDefault();
+            // 用 execCommand 插入以保留 undo 历史，并自动触发 input 事件链路
+            if (!document.execCommand('insertText', false, trimmed)) {
+                target.value = trimmed;
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
     });
     // 清空按钮
     body.querySelectorAll('.lang-editor-clear').forEach((btn) => {
@@ -824,6 +1062,20 @@ function renderEditor() {
                 updateVarHints();
                 updateDirtyState();
             }
+        });
+    });
+    // 翻译填充按钮
+    body.querySelectorAll('.lang-editor-translate').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const lang = btn.getAttribute('data-lang');
+            handleTranslateFill(lang);
+        });
+    });
+    // 调整按钮
+    body.querySelectorAll('.lang-editor-adjust').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const lang = btn.getAttribute('data-lang');
+            handleAdjustOpen(lang);
         });
     });
 }
@@ -952,6 +1204,501 @@ function closeLangManageDialog() {
     const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['lang-manage-overlay'];
     if (overlay)
         overlay.classList.add('hidden');
+}
+// ==================== AI 翻译配置弹窗 ====================
+/** 默认翻译提示词模板 */
+const DEFAULT_AI_PROMPT = `你是专业的游戏本地化翻译。
+请把以下 {sourceLang} 文本翻译为 {targetLang}。
+
+要求：
+1. 只输出译文，不要任何解释、引号或前后缀。
+2. 完整保留原文中的占位符（如 {playerName}、{count} 等花括号变量），不翻译占位符内的内容。
+3. 保留原文的换行、标点、空格风格。
+4. 风格简洁、口语化，符合游戏 UI 语境。
+
+原文：
+{text}`;
+function openAiConfigDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-config-overlay'];
+    if (!overlay)
+        return;
+    overlay.classList.remove('hidden');
+    setAiModelStatus('', '#666');
+    // 加载现有配置
+    loadAiConfigToForm();
+}
+function closeAiConfigDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-config-overlay'];
+    if (overlay)
+        overlay.classList.add('hidden');
+}
+function setAiModelStatus(text, color = '#666') {
+    const el = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-model-status'];
+    if (!el)
+        return;
+    el.textContent = text;
+    el.style.color = color;
+}
+/** 把当前模型选项重置为给定列表，并保留/恢复指定值 */
+function setAiModelOptions(models, preferValue = '') {
+    const sel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-model-select'];
+    if (!sel)
+        return;
+    if (models.length === 0) {
+        sel.innerHTML = '<option value="">— 请先拉取模型列表 —</option>';
+        return;
+    }
+    sel.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    if (preferValue && models.includes(preferValue)) {
+        sel.value = preferValue;
+    }
+    else if (preferValue) {
+        // 已保存的模型不在最新列表中，仍然保留供用户参考
+        const opt = document.createElement('option');
+        opt.value = preferValue;
+        opt.textContent = `${preferValue}（不在当前列表）`;
+        sel.insertBefore(opt, sel.firstChild);
+        sel.value = preferValue;
+    }
+}
+/** 从后端加载配置到表单 */
+async function loadAiConfigToForm() {
+    var _a;
+    try {
+        // @ts-ignore
+        const cfgStr = await Editor.Message.request('framework-plugin', 'i18n-load-ai-config');
+        const cfg = cfgStr ? JSON.parse(cfgStr) : {};
+        const baseUrl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-base-url'];
+        const apiKey = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-api-key'];
+        const prompt = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-prompt'];
+        const timeoutSec = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-timeout-sec'];
+        const retries = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-retries'];
+        const testStatus = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-test-status'];
+        if (baseUrl)
+            baseUrl.value = cfg.baseUrl || '';
+        if (apiKey)
+            apiKey.value = cfg.apiKey || '';
+        if (prompt)
+            prompt.value = cfg.prompt || DEFAULT_AI_PROMPT;
+        if (timeoutSec)
+            timeoutSec.value = String(cfg.timeoutSec || 60);
+        if (retries)
+            retries.value = String((_a = cfg.retries) !== null && _a !== void 0 ? _a : 0);
+        if (testStatus) {
+            testStatus.textContent = '';
+            testStatus.style.color = '#666';
+        }
+        const savedModel = cfg.model || '';
+        const cachedModels = Array.isArray(cfg.cachedModels) ? cfg.cachedModels : [];
+        if (cachedModels.length > 0) {
+            setAiModelOptions(cachedModels, savedModel);
+        }
+        else if (savedModel) {
+            setAiModelOptions([savedModel], savedModel);
+        }
+        else {
+            setAiModelOptions([]);
+        }
+    }
+    catch (e) {
+        console.error('[i18n] 加载 AI 配置失败:', e);
+        const prompt = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-prompt'];
+        if (prompt && !prompt.value)
+            prompt.value = DEFAULT_AI_PROMPT;
+    }
+}
+/** 拉取模型列表 */
+async function fetchAiModels() {
+    var _a, _b, _c, _d, _e;
+    const baseUrl = (_b = (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-base-url']) === null || _a === void 0 ? void 0 : _a.value) === null || _b === void 0 ? void 0 : _b.trim();
+    const apiKey = (_d = (_c = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-api-key']) === null || _c === void 0 ? void 0 : _c.value) === null || _d === void 0 ? void 0 : _d.trim();
+    if (!baseUrl) {
+        setAiModelStatus('请先填写供应商地址', '#e8a040');
+        return;
+    }
+    if (!apiKey) {
+        setAiModelStatus('请先填写 API Key', '#e8a040');
+        return;
+    }
+    const fetchBtn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-fetch-models'];
+    if (fetchBtn)
+        fetchBtn.disabled = true;
+    setAiModelStatus('正在拉取模型列表...', '#569cd6');
+    try {
+        // @ts-ignore
+        const result = await Editor.Message.request('framework-plugin', 'i18n-fetch-ai-models', JSON.stringify({ baseUrl, apiKey }));
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        if (!(parsed === null || parsed === void 0 ? void 0 : parsed.ok)) {
+            setAiModelStatus(`拉取失败: ${(parsed === null || parsed === void 0 ? void 0 : parsed.error) || '未知错误'}`, '#f66');
+            return;
+        }
+        const models = parsed.models || [];
+        if (models.length === 0) {
+            setAiModelStatus('返回的模型列表为空', '#e8a040');
+            setAiModelOptions([]);
+            return;
+        }
+        const currentSel = ((_e = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-model-select']) === null || _e === void 0 ? void 0 : _e.value) || '';
+        setAiModelOptions(models, currentSel);
+        setAiModelStatus(`拉取成功，共 ${models.length} 个模型`, '#4ec9b0');
+    }
+    catch (e) {
+        setAiModelStatus(`拉取失败: ${(e === null || e === void 0 ? void 0 : e.message) || e}`, '#f66');
+    }
+    finally {
+        if (fetchBtn)
+            fetchBtn.disabled = false;
+    }
+}
+// ==================== AI 翻译/调整(在 Key 编辑面板) ====================
+/** 当前调整中的语言(用于弹窗提交回调) */
+let adjustingLang = '';
+/** 取消标志:置 true 后串行循环跳出 */
+let aiCancelled = false;
+/** 当前是否在翻译中(用于互斥) */
+let aiInFlight = false;
+/** 关闭覆盖确认弹窗 */
+function closeOverwriteConfirmDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['overwrite-confirm-overlay'];
+    if (overlay)
+        overlay.classList.add('hidden');
+}
+/** 关闭调整弹窗 */
+function closeAdjustDialog() {
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-overlay'];
+    if (overlay)
+        overlay.classList.add('hidden');
+    adjustingLang = '';
+}
+/** 锁定/解锁某个语言的 textarea(翻译进行中) */
+function setLangTranslating(lang, on) {
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    if (!body)
+        return;
+    const ta = body.querySelector(`.lang-textarea[data-lang="${lang}"]`);
+    if (ta) {
+        ta.disabled = on;
+        ta.classList.toggle('translating', on);
+    }
+    const translateBtn = body.querySelector(`.lang-editor-translate[data-lang="${lang}"]`);
+    const adjustBtn = body.querySelector(`.lang-editor-adjust[data-lang="${lang}"]`);
+    if (translateBtn) {
+        translateBtn.disabled = on;
+        translateBtn.classList.toggle('loading', on);
+    }
+    if (adjustBtn) {
+        adjustBtn.disabled = on;
+    }
+}
+/** 显示/隐藏右下角 AI 进行中浮条 */
+function showAiCancelBar(text) {
+    const bar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-cancel-bar'];
+    const txt = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-cancel-text'];
+    if (bar)
+        bar.classList.remove('hidden');
+    if (txt)
+        txt.textContent = text;
+}
+function hideAiCancelBar() {
+    const bar = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-cancel-bar'];
+    if (bar)
+        bar.classList.add('hidden');
+}
+function updateAiCancelBar(text) {
+    const txt = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-cancel-text'];
+    if (txt)
+        txt.textContent = text;
+}
+/** 用户点取消按钮:通知后端 abort 当前 fetch + 设置前端取消标志 */
+async function cancelAiTranslate() {
+    aiCancelled = true;
+    try {
+        // @ts-ignore
+        await Editor.Message.request('framework-plugin', 'i18n-ai-cancel');
+    }
+    catch (_a) { }
+    setStatus('已取消 AI 翻译', '#e8a040');
+}
+/** 调用一个语言的 AI 翻译(后端单次,可被取消) */
+async function callAiOne(args) {
+    try {
+        // @ts-ignore
+        const result = await Editor.Message.request('framework-plugin', 'i18n-ai-translate-one', JSON.stringify(args));
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    }
+    catch (e) {
+        return { ok: false, error: (e === null || e === void 0 ? void 0 : e.message) || String(e) };
+    }
+}
+/** 并发翻译多个语言,完成一个立即填充该 textarea + 解锁,实时计数 + 可取消 */
+async function callAiAndApply(args) {
+    if (aiInFlight) {
+        setStatus('已有翻译任务进行中,请先取消或等待', '#e8a040');
+        return;
+    }
+    aiInFlight = true;
+    aiCancelled = false;
+    const total = args.targetLangs.length;
+    args.targetLangs.forEach(l => setLangTranslating(l, true));
+    showAiCancelBar(`已完成 0/${total}（并发翻译中）...`);
+    setStatus(`正在并发翻译 ${total} 个语言...`, '#569cd6');
+    let successCount = 0;
+    let failCount = 0;
+    let firstErr = '';
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    try {
+        // 所有语言并发发起,每个完成时立即填充该 textarea + 解锁该按钮 + 更新计数
+        await Promise.all(args.targetLangs.map(async (lang) => {
+            const res = await callAiOne({
+                sourceLang: args.sourceLang,
+                sourceText: args.sourceText,
+                targetLang: lang,
+                instruction: args.instruction,
+            });
+            if (aiCancelled) {
+                // 已取消:不写值,只解锁
+                setLangTranslating(lang, false);
+                return;
+            }
+            if (res.ok && typeof res.text === 'string') {
+                if (body) {
+                    const ta = body.querySelector(`.lang-textarea[data-lang="${lang}"]`);
+                    if (ta)
+                        ta.value = res.text;
+                }
+                successCount++;
+            }
+            else {
+                failCount++;
+                if (!firstErr)
+                    firstErr = `${lang}: ${res.error || '未知错误'}`;
+                console.warn(`[i18n-ai] ${lang} 失败:`, res.error);
+            }
+            setLangTranslating(lang, false);
+            updateVarHints();
+            updateDirtyState();
+            const done = successCount + failCount;
+            updateAiCancelBar(`已完成 ${done}/${total}${failCount > 0 ? `（失败 ${failCount}）` : ''}...`);
+        }));
+        // 取消时把可能漏掉的也解锁
+        if (aiCancelled) {
+            args.targetLangs.forEach(l => setLangTranslating(l, false));
+            setStatus(`已取消 — 已完成 ${successCount}/${total}，记得点保存`, '#e8a040');
+        }
+        else if (failCount > 0) {
+            setStatus(`完成 ${successCount}/${total}，失败 ${failCount}: ${firstErr}`, '#e8a040');
+        }
+        else {
+            setStatus(`AI 翻译完成 (${successCount} 个语言)，记得点保存`, '#4ec9b0');
+        }
+    }
+    finally {
+        aiInFlight = false;
+        aiCancelled = false;
+        hideAiCancelBar();
+    }
+}
+/** 翻译填充按钮:用 sourceLang 翻译填充其他语言 */
+async function handleTranslateFill(sourceLang) {
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    if (!body)
+        return;
+    const sourceTa = body.querySelector(`.lang-textarea[data-lang="${sourceLang}"]`);
+    const sourceText = ((sourceTa === null || sourceTa === void 0 ? void 0 : sourceTa.value) || '').trim();
+    if (!sourceText) {
+        setStatus(`请先在 ${sourceLang} 中填入要翻译的文本`, '#e8a040');
+        return;
+    }
+    // 收集其他所有语言
+    const allLangs = (payload === null || payload === void 0 ? void 0 : payload.languages) || [];
+    const otherLangs = allLangs.filter(l => l !== sourceLang);
+    if (otherLangs.length === 0) {
+        setStatus('没有其他可翻译的语言', '#e8a040');
+        return;
+    }
+    // 检测哪些已有内容
+    const occupied = [];
+    for (const lang of otherLangs) {
+        const ta = body.querySelector(`.lang-textarea[data-lang="${lang}"]`);
+        if (ta && ta.value.trim())
+            occupied.push(lang);
+    }
+    const doTranslate = (langs) => callAiAndApply({ sourceLang, sourceText, targetLangs: langs });
+    if (occupied.length === 0) {
+        // 全是空白，直接翻
+        doTranslate(otherLangs);
+        return;
+    }
+    // 有已存在内容，弹确认
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['overwrite-confirm-overlay'];
+    const hint = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['overwrite-confirm-hint'];
+    if (!overlay)
+        return;
+    if (hint) {
+        hint.innerHTML = `检测到 <b style="color:#e8a040">${occupied.length}</b> 个目标语言已有翻译：<b>${esc(occupied.join(', '))}</b><br>请选择处理方式：<br>• <b>覆盖全部</b>：翻译并覆盖所有 ${otherLangs.length} 个目标语言<br>• <b>仅填空白</b>：只翻译尚未填写的 ${otherLangs.length - occupied.length} 个语言<br>• <b>取消</b>：不做任何操作`;
+    }
+    overlay.classList.remove('hidden');
+    // 一次性绑定（每次重新绑，避免上次回调残留）
+    const overwriteAll = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-overwrite-all'];
+    const overwriteSkip = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-overwrite-skip'];
+    const overwriteCancel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-overwrite-cancel'];
+    const cleanup = () => {
+        overwriteAll.onclick = null;
+        overwriteSkip.onclick = null;
+        overwriteCancel.onclick = null;
+    };
+    overwriteAll.onclick = () => {
+        cleanup();
+        closeOverwriteConfirmDialog();
+        doTranslate(otherLangs);
+    };
+    overwriteSkip.onclick = () => {
+        cleanup();
+        closeOverwriteConfirmDialog();
+        const blankOnly = otherLangs.filter(l => !occupied.includes(l));
+        if (blankOnly.length === 0) {
+            setStatus('没有空白语言需要填充', '#888');
+            return;
+        }
+        doTranslate(blankOnly);
+    };
+    overwriteCancel.onclick = () => {
+        cleanup();
+        closeOverwriteConfirmDialog();
+    };
+}
+/** 调整按钮:打开调整弹窗 */
+function handleAdjustOpen(targetLang) {
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    if (!body)
+        return;
+    const ta = body.querySelector(`.lang-textarea[data-lang="${targetLang}"]`);
+    const currentText = (ta === null || ta === void 0 ? void 0 : ta.value) || '';
+    if (!currentText.trim()) {
+        setStatus(`请先在 ${targetLang} 中填入原始文本，再使用「调整」`, '#e8a040');
+        return;
+    }
+    adjustingLang = targetLang;
+    const title = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-dialog-title'];
+    const currentEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-current-text'];
+    const instructionEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-instruction'];
+    const overlay = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-overlay'];
+    if (title)
+        title.textContent = `调整翻译 — ${targetLang}`;
+    if (currentEl)
+        currentEl.textContent = currentText;
+    if (instructionEl) {
+        instructionEl.value = '';
+        setTimeout(() => instructionEl.focus(), 50);
+    }
+    if (overlay)
+        overlay.classList.remove('hidden');
+}
+/** 调整提交 */
+async function handleAdjustSubmit() {
+    if (!adjustingLang)
+        return;
+    const instructionEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['adjust-instruction'];
+    const instruction = ((instructionEl === null || instructionEl === void 0 ? void 0 : instructionEl.value) || '').trim();
+    if (!instruction) {
+        setStatus('请输入补充描述', '#e8a040');
+        instructionEl === null || instructionEl === void 0 ? void 0 : instructionEl.focus();
+        return;
+    }
+    const body = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['edit-body'];
+    if (!body)
+        return;
+    const ta = body.querySelector(`.lang-textarea[data-lang="${adjustingLang}"]`);
+    const currentText = (ta === null || ta === void 0 ? void 0 : ta.value) || '';
+    const lang = adjustingLang;
+    closeAdjustDialog();
+    // 调整模式:sourceLang 和 targetLang 相同,把当前文本作为源
+    await callAiAndApply({
+        sourceLang: lang,
+        sourceText: currentText,
+        targetLangs: [lang],
+        instruction,
+    });
+}
+/** 收集表单到配置对象（不含 cachedModels） */
+function collectAiConfigFromForm() {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const baseUrl = ((_b = (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-base-url']) === null || _a === void 0 ? void 0 : _a.value) === null || _b === void 0 ? void 0 : _b.trim()) || '';
+    const apiKey = ((_d = (_c = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-api-key']) === null || _c === void 0 ? void 0 : _c.value) === null || _d === void 0 ? void 0 : _d.trim()) || '';
+    const model = ((_e = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-model-select']) === null || _e === void 0 ? void 0 : _e.value) || '';
+    const prompt = ((_f = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-prompt']) === null || _f === void 0 ? void 0 : _f.value) || '';
+    const timeoutSec = parseInt(((_g = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-timeout-sec']) === null || _g === void 0 ? void 0 : _g.value) || '60', 10) || 60;
+    const retries = parseInt(((_h = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-retries']) === null || _h === void 0 ? void 0 : _h.value) || '0', 10) || 0;
+    const sel = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-model-select'];
+    const cachedModels = [];
+    if (sel) {
+        for (let i = 0; i < sel.options.length; i++) {
+            const v = sel.options[i].value;
+            if (v)
+                cachedModels.push(v);
+        }
+    }
+    return { baseUrl, apiKey, model, prompt, timeoutSec, retries, cachedModels };
+}
+/** 保存 AI 配置 */
+async function saveAiConfig() {
+    const cfg = collectAiConfigFromForm();
+    try {
+        // @ts-ignore
+        await Editor.Message.request('framework-plugin', 'i18n-save-ai-config', JSON.stringify(cfg));
+        setStatus('AI 翻译配置已保存', '#4ec9b0');
+        closeAiConfigDialog();
+    }
+    catch (e) {
+        setStatus(`保存失败: ${(e === null || e === void 0 ? void 0 : e.message) || e}`, '#f66');
+    }
+}
+/** 测试连接 */
+async function testAiConnection() {
+    const cfg = collectAiConfigFromForm();
+    const statusEl = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ai-test-status'];
+    const btn = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-test-connection'];
+    const setText = (text, color) => {
+        if (statusEl) {
+            statusEl.textContent = text;
+            statusEl.style.color = color;
+        }
+    };
+    if (!cfg.baseUrl) {
+        setText('请先填供应商地址', '#e8a040');
+        return;
+    }
+    if (!cfg.apiKey) {
+        setText('请先填 API Key', '#e8a040');
+        return;
+    }
+    if (!cfg.model) {
+        setText('请先选模型（可先点「拉取模型列表」）', '#e8a040');
+        return;
+    }
+    if (btn)
+        btn.disabled = true;
+    setText(`正在测试（最长 ${cfg.timeoutSec}s）...`, '#569cd6');
+    try {
+        // @ts-ignore
+        const result = await Editor.Message.request('framework-plugin', 'i18n-ai-test-connection', JSON.stringify({
+            baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, timeoutSec: cfg.timeoutSec,
+        }));
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        if (parsed === null || parsed === void 0 ? void 0 : parsed.ok) {
+            setText(`✓ 连接成功 (${parsed.cost}ms) — 回复: ${parsed.reply || '(空)'}`, '#4ec9b0');
+        }
+        else {
+            setText(`✗ 连接失败: ${(parsed === null || parsed === void 0 ? void 0 : parsed.error) || '未知错误'}`, '#f66');
+        }
+    }
+    catch (e) {
+        setText(`✗ 连接失败: ${(e === null || e === void 0 ? void 0 : e.message) || e}`, '#f66');
+    }
+    finally {
+        if (btn)
+            btn.disabled = false;
+    }
 }
 /** 渲染语言管理列表 */
 function renderLangList() {
@@ -1130,7 +1877,7 @@ function esc(str) {
 }
 // ==================== 生命周期 ====================
 function ready() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10;
     panelRef = this;
     // 选择模式：取消（关闭面板）
     (_a = this.$['btn-cancel-pick']) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => {
@@ -1191,15 +1938,57 @@ function ready() {
     (_h = this.$['btn-lang-manage']) === null || _h === void 0 ? void 0 : _h.addEventListener('click', () => {
         openLangManageDialog();
     });
+    // AI 翻译配置
+    (_j = this.$['btn-ai-config']) === null || _j === void 0 ? void 0 : _j.addEventListener('click', () => {
+        openAiConfigDialog();
+    });
+    (_k = this.$['btn-close-ai-dialog']) === null || _k === void 0 ? void 0 : _k.addEventListener('click', closeAiConfigDialog);
+    (_l = this.$['btn-cancel-ai-config']) === null || _l === void 0 ? void 0 : _l.addEventListener('click', closeAiConfigDialog);
+    (_m = this.$['ai-config-overlay']) === null || _m === void 0 ? void 0 : _m.addEventListener('click', (e) => {
+        if (e.target === panelRef.$['ai-config-overlay']) {
+            closeAiConfigDialog();
+        }
+    });
+    (_o = this.$['btn-fetch-models']) === null || _o === void 0 ? void 0 : _o.addEventListener('click', fetchAiModels);
+    (_p = this.$['btn-save-ai-config']) === null || _p === void 0 ? void 0 : _p.addEventListener('click', saveAiConfig);
+    (_q = this.$['btn-test-connection']) === null || _q === void 0 ? void 0 : _q.addEventListener('click', testAiConnection);
+    // AI 翻译进行中的取消按钮
+    (_r = this.$['btn-cancel-ai']) === null || _r === void 0 ? void 0 : _r.addEventListener('click', cancelAiTranslate);
+    // 覆盖确认弹窗(✕ + 点遮罩)
+    (_s = this.$['btn-close-overwrite-dialog']) === null || _s === void 0 ? void 0 : _s.addEventListener('click', closeOverwriteConfirmDialog);
+    (_t = this.$['overwrite-confirm-overlay']) === null || _t === void 0 ? void 0 : _t.addEventListener('click', (e) => {
+        if (e.target === panelRef.$['overwrite-confirm-overlay']) {
+            closeOverwriteConfirmDialog();
+        }
+    });
+    // 调整弹窗
+    (_u = this.$['btn-close-adjust-dialog']) === null || _u === void 0 ? void 0 : _u.addEventListener('click', closeAdjustDialog);
+    (_v = this.$['btn-adjust-cancel']) === null || _v === void 0 ? void 0 : _v.addEventListener('click', closeAdjustDialog);
+    (_w = this.$['adjust-overlay']) === null || _w === void 0 ? void 0 : _w.addEventListener('click', (e) => {
+        if (e.target === panelRef.$['adjust-overlay']) {
+            closeAdjustDialog();
+        }
+    });
+    (_x = this.$['btn-adjust-submit']) === null || _x === void 0 ? void 0 : _x.addEventListener('click', handleAdjustSubmit);
+    // Cmd/Ctrl + Enter 在描述框中提交
+    (_y = this.$['adjust-instruction']) === null || _y === void 0 ? void 0 : _y.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault();
+            handleAdjustSubmit();
+        }
+        else if (e.key === 'Escape') {
+            closeAdjustDialog();
+        }
+    });
     // 关闭语言管理弹窗
-    (_j = this.$['btn-close-lang-dialog']) === null || _j === void 0 ? void 0 : _j.addEventListener('click', closeLangManageDialog);
-    (_k = this.$['lang-manage-overlay']) === null || _k === void 0 ? void 0 : _k.addEventListener('click', (e) => {
+    (_z = this.$['btn-close-lang-dialog']) === null || _z === void 0 ? void 0 : _z.addEventListener('click', closeLangManageDialog);
+    (_0 = this.$['lang-manage-overlay']) === null || _0 === void 0 ? void 0 : _0.addEventListener('click', (e) => {
         if (e.target === panelRef.$['lang-manage-overlay']) {
             closeLangManageDialog();
         }
     });
     // 添加新语言
-    (_l = this.$['btn-add-new-lang']) === null || _l === void 0 ? void 0 : _l.addEventListener('click', () => {
+    (_1 = this.$['btn-add-new-lang']) === null || _1 === void 0 ? void 0 : _1.addEventListener('click', () => {
         var _a, _b;
         const input = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['new-lang-input'];
         const lang = (_a = input === null || input === void 0 ? void 0 : input.value) === null || _a === void 0 ? void 0 : _a.trim();
@@ -1214,14 +2003,14 @@ function ready() {
         closeLangManageDialog();
     });
     // 回车也可添加
-    (_m = this.$['new-lang-input']) === null || _m === void 0 ? void 0 : _m.addEventListener('keydown', (e) => {
+    (_2 = this.$['new-lang-input']) === null || _2 === void 0 ? void 0 : _2.addEventListener('keydown', (e) => {
         var _a;
         if (e.key === 'Enter') {
             (_a = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['btn-add-new-lang']) === null || _a === void 0 ? void 0 : _a.click();
         }
     });
     // 复制 Key 路径
-    (_o = this.$['btn-copy-key']) === null || _o === void 0 ? void 0 : _o.addEventListener('click', () => {
+    (_3 = this.$['btn-copy-key']) === null || _3 === void 0 ? void 0 : _3.addEventListener('click', () => {
         if (selectedNamespace && selectedKey) {
             const fullPath = `${selectedNamespace}.${selectedKey}`;
             navigator.clipboard.writeText(fullPath).then(() => {
@@ -1239,7 +2028,7 @@ function ready() {
         }
     });
     // 添加命名空间（内联输入框）
-    (_p = this.$['btn-add-ns']) === null || _p === void 0 ? void 0 : _p.addEventListener('click', () => {
+    (_4 = this.$['btn-add-ns']) === null || _4 === void 0 ? void 0 : _4.addEventListener('click', () => {
         const list = panelRef === null || panelRef === void 0 ? void 0 : panelRef.$['ns-list'];
         if (!list)
             return;
@@ -1274,7 +2063,7 @@ function ready() {
         input.addEventListener('blur', commit);
     });
     // 重命名命名空间（底部按钮）
-    (_q = this.$['btn-rename-ns']) === null || _q === void 0 ? void 0 : _q.addEventListener('click', () => {
+    (_5 = this.$['btn-rename-ns']) === null || _5 === void 0 ? void 0 : _5.addEventListener('click', () => {
         if (!selectedNamespace)
             return;
         renamingNs = selectedNamespace;
@@ -1288,7 +2077,7 @@ function ready() {
         }
     });
     // 删除命名空间（底部按钮）
-    (_r = this.$['btn-delete-ns']) === null || _r === void 0 ? void 0 : _r.addEventListener('click', async () => {
+    (_6 = this.$['btn-delete-ns']) === null || _6 === void 0 ? void 0 : _6.addEventListener('click', async () => {
         if (!selectedNamespace)
             return;
         const result = await Editor.Dialog.warn(`确定删除命名空间 "${selectedNamespace}" 及其所有 Key？`, {
@@ -1314,7 +2103,7 @@ function ready() {
         renderKeys();
     });
     // 添加 Key（内联输入框）
-    (_s = this.$['btn-add-key']) === null || _s === void 0 ? void 0 : _s.addEventListener('click', () => {
+    (_7 = this.$['btn-add-key']) === null || _7 === void 0 ? void 0 : _7.addEventListener('click', () => {
         if (!selectedNamespace) {
             setStatus('请先选择命名空间');
             return;
@@ -1353,12 +2142,12 @@ function ready() {
         input.addEventListener('blur', commit);
     });
     // 取消修改（恢复到保存前的数据）
-    (_t = this.$['btn-cancel-key']) === null || _t === void 0 ? void 0 : _t.addEventListener('click', () => {
+    (_8 = this.$['btn-cancel-key']) === null || _8 === void 0 ? void 0 : _8.addEventListener('click', () => {
         renderEditor();
         setStatus('已取消修改');
     });
     // 保存 Key 翻译
-    (_u = this.$['btn-save-key']) === null || _u === void 0 ? void 0 : _u.addEventListener('click', () => {
+    (_9 = this.$['btn-save-key']) === null || _9 === void 0 ? void 0 : _9.addEventListener('click', () => {
         if (!selectedKey || !selectedNamespace)
             return;
         const translations = collectTranslations();
@@ -1370,7 +2159,7 @@ function ready() {
         }));
     });
     // 删除 Key
-    (_v = this.$['btn-delete-key']) === null || _v === void 0 ? void 0 : _v.addEventListener('click', async () => {
+    (_10 = this.$['btn-delete-key']) === null || _10 === void 0 ? void 0 : _10.addEventListener('click', async () => {
         if (!selectedKey || !selectedNamespace)
             return;
         const result = await Editor.Dialog.warn(`确定删除 Key "${selectedNamespace}.${selectedKey}"？`, {
@@ -1425,6 +2214,9 @@ function close() {
     availableGames = [];
     pendingSwitchSource = '';
     originalTranslations = {};
+    adjustingLang = '';
+    aiCancelled = false;
+    aiInFlight = false;
 }
 exports.close = close;
 // ==================== 面板方法（接收消息） ====================

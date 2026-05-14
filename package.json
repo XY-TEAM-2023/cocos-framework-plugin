@@ -804,6 +804,27 @@
       "i18n-list-available-games": {
         "methods": ["listAvailableGamesForI18n"]
       },
+      "i18n-load-ai-config": {
+        "methods": ["i18nLoadAiConfig"]
+      },
+      "i18n-save-ai-config": {
+        "methods": ["i18nSaveAiConfig"]
+      },
+      "i18n-fetch-ai-models": {
+        "methods": ["i18nFetchAiModels"]
+      },
+      "i18n-ai-translate": {
+        "methods": ["i18nAiTranslate"]
+      },
+      "i18n-ai-translate-one": {
+        "methods": ["i18nAiTranslateOne"]
+      },
+      "i18n-ai-cancel": {
+        "methods": ["i18nAiCancel"]
+      },
+      "i18n-ai-test-connection": {
+        "methods": ["i18nAiTestConnection"]
+      },
       "set-i18n-data": {
         "methods": ["i18n.setI18nData"]
       },

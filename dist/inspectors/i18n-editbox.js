@@ -414,9 +414,25 @@ function renderPreview(self, key) {
     if (!list)
         return;
     if (!key) {
-        list.innerHTML = '';
         inst.placeholders = new Set();
         inst.sortedLangs = [];
+        // 未选 key 时仍渲染语言列表占位，避免组件视觉残缺
+        if (snapshot.languages.length === 0) {
+            list.innerHTML = '';
+            return;
+        }
+        const primaryLang = snapshot.primaryLang;
+        const placeholderLangs = [...snapshot.languages].sort((a, b) => {
+            if (a === primaryLang)
+                return -1;
+            if (b === primaryLang)
+                return 1;
+            return a.localeCompare(b);
+        });
+        list.innerHTML = placeholderLangs.map(lang => `<div class="preview-item">
+                <span class="preview-lang">${escHtml(lang)}</span>
+                <span class="preview-text empty">未设置</span>
+            </div>`).join('');
         return;
     }
     const translations = getTranslations(key);
@@ -714,11 +730,14 @@ function syncDetectedParams(self) {
     }
 }
 // ==================== Scene API（async 边界，闭包持有） ====================
-/** 提交某个属性到引擎；闭包捕获 nodeUuid + propertyPath + dumpPayload */
-async function commitProperty(self, propertyName) {
+/**
+ * 提交某个属性到引擎；闭包捕获 nodeUuid + propertyPath + dumpPayload
+ * dumpOverride: pick 异步链路里传入入口快照的 dump，避免读到已被 inspector 复用替换的 inst.dump
+ */
+async function commitProperty(self, propertyName, dumpOverride) {
     var _a, _b;
     const inst = getInst(self);
-    const dump = inst.dump;
+    const dump = dumpOverride || inst.dump;
     const propDump = (_a = dump === null || dump === void 0 ? void 0 : dump.value) === null || _a === void 0 ? void 0 : _a[propertyName];
     if (!propDump)
         return;
@@ -845,24 +864,47 @@ async function checkPickedKey() {
         await applyPickedKey(requester.panelThis, key);
     }
 }
-/** 把选中的 key 写入主 key（用 pickContext.nodeUuid，不依赖当下 selection） */
+/**
+ * 把选中的 key 写入主 key（用 pickContext.nodeUuid，不依赖当下 selection）
+ *
+ * 关键约束（修复 inspector 复用导致的串台 + 新建 key snapshot 滞后）：
+ * 1. 入口先 await refreshSnapshot(true)，确保新建/编辑过的 key 在本地快照里
+ * 2. 入口快照 dumpAtStart 并捕获所有 dump 字段到局部常量；后续异步链路 **绝不** 再读 inst.dump
+ * 3. 写 in-memory dump 值前比对 inst.dump === dumpAtStart，已被替换则跳过避免污染新节点
+ * 4. 末尾 UI 重渲同样比对，已切走就让 Cocos 自己的下一次 update 处理新节点
+ */
 async function applyPickedKey(self, key) {
     var _a;
     const inst = getInst(self);
-    const dump = inst.dump;
     const ctx = inst.pickContext;
-    if (!((_a = dump === null || dump === void 0 ? void 0 : dump.value) === null || _a === void 0 ? void 0 : _a.key)) {
+    const dumpAtStart = inst.dump;
+    if (!((_a = dumpAtStart === null || dumpAtStart === void 0 ? void 0 : dumpAtStart.value) === null || _a === void 0 ? void 0 : _a.key)) {
         console.warn(`${LOG_TAG} applyPickedKey: dump.value.key 不存在`);
         return;
     }
-    // 修改 in-memory dump 值
-    dump.value.key.value = key;
+    // 闭包捕获所有需要的字段（异步链路只读这些局部常量）
+    const propDump = dumpAtStart.value.key;
+    const propertyPath = propDump.path || `${dumpAtStart.path || ''}.key`;
+    const propType = propDump.type;
+    const propIsArray = propDump.isArray;
+    const compPath = dumpAtStart.path || '';
     // 用 pickContext.nodeUuid 兜底（场景里 selection 可能丢失）
     const nodeUuid = (ctx === null || ctx === void 0 ? void 0 : ctx.nodeUuid) || (() => {
         // @ts-ignore
         const u = Editor.Selection.getSelected('node');
         return (u === null || u === void 0 ? void 0 : u[0]) || '';
     })();
+    // 强制刷新 snapshot：保证刚在面板里新建/编辑的 key 翻译已落到本地
+    try {
+        await refreshSnapshot(true);
+    }
+    catch (e) {
+        console.warn(`${LOG_TAG} applyPickedKey: refreshSnapshot 失败，继续:`, e);
+    }
+    // 修改 in-memory dump 值（仅当 inst.dump 还是同一个时；切走了就别污染新节点）
+    if (inst.dump === dumpAtStart) {
+        dumpAtStart.value.key.value = key;
+    }
     if (!nodeUuid) {
         console.error(`${LOG_TAG} applyPickedKey: 拿不到 nodeUuid`);
         try {
@@ -871,17 +913,15 @@ async function applyPickedKey(self, key) {
         catch (_b) { }
     }
     else {
-        const propDump = dump.value.key;
-        const propertyPath = propDump.path || `${dump.path || ''}.key`;
         try {
             // @ts-ignore
             await Editor.Message.request('scene', 'set-property', {
                 uuid: nodeUuid,
                 path: propertyPath,
                 dump: {
-                    type: propDump.type,
+                    type: propType,
                     value: key,
-                    isArray: propDump.isArray,
+                    isArray: propIsArray,
                 },
             });
             console.log(`${LOG_TAG} applyPickedKey: scene:set-property 成功, key="${key}"`);
@@ -895,7 +935,12 @@ async function applyPickedKey(self, key) {
         }
     }
     // 立即同步 EditBox.placeholder
-    await syncEditBoxPlaceholder(nodeUuid, dump.path || '', key);
+    await syncEditBoxPlaceholder(nodeUuid, compPath, key);
+    // 渲染保护：inspector 已切走就不再渲染，让 Cocos 下一次 update 自己刷新当前显示的节点
+    if (inst.dump !== dumpAtStart) {
+        console.log(`${LOG_TAG} applyPickedKey: inspector 已切换节点，跳过 UI 重渲`);
+        return;
+    }
     // 立即更新显示（不等下一次 update 触发）
     const keyDisplay = self.$['key-display'];
     if (keyDisplay) {
@@ -908,15 +953,30 @@ async function applyPickedKey(self, key) {
     inst.pickContext = null;
 }
 async function applyPickedParamKey(self, idx, key) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d;
     const inst = getInst(self);
-    const params = (_c = (_b = (_a = inst.dump) === null || _a === void 0 ? void 0 : _a.value) === null || _b === void 0 ? void 0 : _b.paramList) === null || _c === void 0 ? void 0 : _c.value;
-    if (!((_e = (_d = params === null || params === void 0 ? void 0 : params[idx]) === null || _d === void 0 ? void 0 : _d.value) === null || _e === void 0 ? void 0 : _e.value)) {
+    const dumpAtStart = inst.dump;
+    const params = (_b = (_a = dumpAtStart === null || dumpAtStart === void 0 ? void 0 : dumpAtStart.value) === null || _a === void 0 ? void 0 : _a.paramList) === null || _b === void 0 ? void 0 : _b.value;
+    if (!((_d = (_c = params === null || params === void 0 ? void 0 : params[idx]) === null || _c === void 0 ? void 0 : _c.value) === null || _d === void 0 ? void 0 : _d.value)) {
         console.warn(`${LOG_TAG} applyPickedParamKey: paramList[${idx}] 不存在`);
         return;
     }
+    try {
+        await refreshSnapshot(true);
+    }
+    catch (e) {
+        console.warn(`${LOG_TAG} applyPickedParamKey: refreshSnapshot 失败，继续:`, e);
+    }
+    if (inst.dump !== dumpAtStart) {
+        console.log(`${LOG_TAG} applyPickedParamKey: inspector 已切换节点，放弃改 paramList`);
+        return;
+    }
     params[idx].value.value.value = key;
-    await commitProperty(self, 'paramList');
+    await commitProperty(self, 'paramList', dumpAtStart);
+    if (inst.dump !== dumpAtStart) {
+        console.log(`${LOG_TAG} applyPickedParamKey: 提交后 inspector 已切换，跳过 UI 重渲`);
+        return;
+    }
     renderParamSection(self);
     inst.pickContext = null;
 }

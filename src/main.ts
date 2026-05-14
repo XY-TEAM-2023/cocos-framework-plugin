@@ -102,6 +102,210 @@ function saveI18nConfig() {
     }
 }
 
+// ==================== AI 翻译配置 ====================
+
+/** AI 翻译配置文件名（项目根） */
+const AI_CONFIG_FILE = '.ai-translate-config.json';
+
+/** AI 翻译配置数据结构 */
+interface AiTranslateConfig {
+    /** 供应商 base URL，如 https://api.openai.com/v1 */
+    baseUrl: string;
+    /** API Key */
+    apiKey: string;
+    /** 当前选中模型 */
+    model: string;
+    /** 翻译提示词模板 */
+    prompt: string;
+    /** 单次请求超时秒数（默认 60） */
+    timeoutSec?: number;
+    /** 失败重试次数（默认 1，即失败后再试 1 次） */
+    retries?: number;
+    /** 上次拉取到的模型列表（缓存，便于下次打开时显示） */
+    cachedModels?: string[];
+}
+
+function getAiConfigPath(): string {
+    return path.join(Editor.Project.path, AI_CONFIG_FILE);
+}
+
+function loadAiTranslateConfig(): AiTranslateConfig | null {
+    try {
+        const p = getAiConfigPath();
+        if (!fs.existsSync(p)) return null;
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch (e) {
+        console.warn('[i18n] 加载 AI 配置失败:', e);
+        return null;
+    }
+}
+
+function saveAiTranslateConfig(cfg: AiTranslateConfig): void {
+    const p = getAiConfigPath();
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
+    ensureGitignoreEntry(AI_CONFIG_FILE);
+}
+
+/** 把指定文件名追加到项目根 .gitignore（如果还没有） */
+function ensureGitignoreEntry(entry: string): void {
+    try {
+        const gi = path.join(Editor.Project.path, '.gitignore');
+        let content = '';
+        if (fs.existsSync(gi)) content = fs.readFileSync(gi, 'utf8');
+        const lines = content.split(/\r?\n/).map(l => l.trim());
+        if (lines.includes(entry)) return;
+        const sep = content.length === 0 || content.endsWith('\n') ? '' : '\n';
+        fs.appendFileSync(gi, `${sep}${entry}\n`, 'utf8');
+    } catch (e) {
+        console.warn('[i18n] 写 .gitignore 失败:', e);
+    }
+}
+
+/** 当前进行中的所有 AI 请求 controller(支持并发,前端取消时全部 abort) */
+const activeAiAbortControllers: Set<AbortController> = new Set();
+
+/** 把多个 AbortSignal 合并成一个,任意一个 abort 都会触发新 signal */
+function anySignal(signals: Array<AbortSignal | undefined>): AbortSignal {
+    const ctrl = new AbortController();
+    for (const s of signals) {
+        if (!s) continue;
+        if (s.aborted) { ctrl.abort((s as any).reason); break; }
+        s.addEventListener('abort', () => ctrl.abort((s as any).reason), { once: true });
+    }
+    return ctrl.signal;
+}
+
+/** 用 OpenAI 兼容协议调 chat/completions,返回 assistant 文本 */
+async function callAiChat(opts: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    system?: string;
+    user: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    /** 用于日志区分,可选 */
+    tag?: string;
+}): Promise<string> {
+    const url = opts.baseUrl.replace(/\/$/, '') + '/chat/completions';
+    const messages: Array<{ role: string; content: string }> = [];
+    if (opts.system) messages.push({ role: 'system', content: opts.system });
+    messages.push({ role: 'user', content: opts.user });
+    const timeoutMs = Math.max(5000, opts.timeoutMs || 60000);
+    const timeoutSignal = (AbortSignal as any).timeout
+        ? (AbortSignal as any).timeout(timeoutMs)
+        : undefined;
+    const signal = anySignal([opts.signal, timeoutSignal]);
+    const tag = opts.tag ? `[${opts.tag}]` : '';
+    const start = Date.now();
+    console.log(`[i18n-ai]${tag} → POST ${url} model=${opts.model} prompt=${opts.user.length}字 timeout=${Math.round(timeoutMs / 1000)}s`);
+    let resp: any;
+    try {
+        resp = await (globalThis as any).fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${opts.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: opts.model,
+                messages,
+                temperature: 0.3,
+                stream: false,
+            }),
+            signal,
+        });
+    } catch (e: any) {
+        const cost = Date.now() - start;
+        if (e?.name === 'AbortError' || e?.name === 'TimeoutError') {
+            const reason = (signal as any).reason;
+            const isTimeout = reason?.name === 'TimeoutError' || (timeoutSignal && timeoutSignal.aborted);
+            const msg = isTimeout
+                ? `请求超时(${Math.round(timeoutMs / 1000)}s 未响应,可在配置中调大「超时」或换更快模型)`
+                : '请求被取消';
+            console.warn(`[i18n-ai]${tag} ✕ ${msg} (${cost}ms)`);
+            throw new Error(msg);
+        }
+        console.warn(`[i18n-ai]${tag} ✕ 网络错误: ${e?.message || e} (${cost}ms)`);
+        throw new Error(`网络错误: ${e?.message || e}`);
+    }
+    const cost = Date.now() - start;
+    if (!resp.ok) {
+        let errBody = '';
+        try { errBody = await resp.text(); } catch {}
+        const msg = `HTTP ${resp.status} ${resp.statusText || ''}${errBody ? ' — ' + errBody.slice(0, 300) : ''}`;
+        console.warn(`[i18n-ai]${tag} ✕ ${msg} (${cost}ms)`);
+        throw new Error(msg);
+    }
+    const json = await resp.json();
+    const text = json?.choices?.[0]?.message?.content;
+    if (typeof text !== 'string') {
+        const dump = JSON.stringify(json).slice(0, 300);
+        console.warn(`[i18n-ai]${tag} ✕ 返回格式异常: ${dump} (${cost}ms)`);
+        throw new Error(`返回格式异常: ${dump}`);
+    }
+    console.log(`[i18n-ai]${tag} ✓ 完成 ${text.length}字 (${cost}ms)`);
+    return text.trim();
+}
+
+/** 调用 AI 并按需重试 */
+async function callAiChatWithRetry(opts: Parameters<typeof callAiChat>[0] & { retries?: number }): Promise<string> {
+    const retries = Math.max(0, Math.min(5, opts.retries ?? 1));
+    let lastErr: any;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await callAiChat({ ...opts, tag: `${opts.tag || ''}${attempt > 0 ? ` 重试${attempt}` : ''}`.trim() });
+        } catch (e: any) {
+            lastErr = e;
+            const msg = e?.message || String(e);
+            // 用户主动取消不重试
+            if (msg.includes('请求被取消')) throw e;
+            if (attempt < retries) {
+                console.warn(`[i18n-ai] 第 ${attempt + 1} 次失败,准备重试: ${msg}`);
+                continue;
+            }
+        }
+    }
+    throw lastErr;
+}
+
+/** 把渲染好的提示词中常用占位符替换掉 */
+function renderPromptTemplate(tpl: string, vars: Record<string, string>): string {
+    let out = tpl || '';
+    for (const [k, v] of Object.entries(vars)) {
+        out = out.split(`{${k}}`).join(v);
+    }
+    return out;
+}
+
+/** 用 OpenAI 兼容协议拉取模型列表 */
+async function fetchAiModelsFromProvider(baseUrl: string, apiKey: string): Promise<string[]> {
+    const url = baseUrl.replace(/\/$/, '') + '/models';
+    // Cocos Creator 内置 Electron，全局有 fetch
+    const resp: any = await (globalThis as any).fetch(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+    });
+    if (!resp.ok) {
+        let errBody = '';
+        try { errBody = await resp.text(); } catch {}
+        throw new Error(`HTTP ${resp.status} ${resp.statusText}${errBody ? ' — ' + errBody.slice(0, 200) : ''}`);
+    }
+    const json = await resp.json();
+    // OpenAI 兼容格式：{ data: [{ id: "gpt-4o", ... }, ...] }
+    const arr = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+    const ids: string[] = [];
+    for (const item of arr) {
+        const id = typeof item === 'string' ? item : item?.id;
+        if (typeof id === 'string' && id) ids.push(id);
+    }
+    // 去重 + 排序
+    return [...new Set(ids)].sort();
+}
+
 /** 不扫描 i18n 的目录（框架、内部资源等） */
 const I18N_SCAN_EXCLUDE_DIRS = new Set(['framework', 'internal']);
 
@@ -2866,6 +3070,205 @@ export const methods: { [key: string]: (...args: any) => any } = {
             Editor.Message.send('framework-plugin', 'set-i18n-available-games', JSON.stringify(list));
         } catch (e) {
             console.error('[i18n] listAvailableBundles 失败:', e);
+        }
+    },
+
+    /** 加载 AI 翻译配置（返回 JSON 字符串，没有则返回空串） */
+    async i18nLoadAiConfig(): Promise<string> {
+        const cfg = loadAiTranslateConfig();
+        return cfg ? JSON.stringify(cfg) : '';
+    },
+
+    /** 保存 AI 翻译配置 */
+    async i18nSaveAiConfig(dataStr: string): Promise<{ ok: boolean; error?: string }> {
+        try {
+            const cfg = JSON.parse(dataStr || '{}') as AiTranslateConfig;
+            saveAiTranslateConfig({
+                baseUrl: String(cfg.baseUrl || '').trim(),
+                apiKey: String(cfg.apiKey || '').trim(),
+                model: String(cfg.model || ''),
+                prompt: String(cfg.prompt || ''),
+                timeoutSec: Math.max(5, Math.min(600, Number(cfg.timeoutSec) || 60)),
+                retries: Math.max(0, Math.min(5, Number(cfg.retries) || 0)),
+                cachedModels: Array.isArray(cfg.cachedModels) ? cfg.cachedModels : [],
+            });
+            return { ok: true };
+        } catch (e: any) {
+            console.error('[i18n] saveAiConfig 失败:', e);
+            return { ok: false, error: e?.message || String(e) };
+        }
+    },
+
+    /** 用 OpenAI 兼容协议拉取模型列表 */
+    async i18nFetchAiModels(dataStr: string): Promise<{ ok: boolean; models?: string[]; error?: string }> {
+        try {
+            const { baseUrl, apiKey } = JSON.parse(dataStr || '{}') as { baseUrl: string; apiKey: string };
+            if (!baseUrl) return { ok: false, error: '缺少 baseUrl' };
+            if (!apiKey) return { ok: false, error: '缺少 apiKey' };
+            const models = await fetchAiModelsFromProvider(baseUrl, apiKey);
+            return { ok: true, models };
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e) };
+        }
+    },
+
+    /**
+     * AI 翻译/调整(单个目标语言)
+     * 入参 { sourceLang, sourceText, targetLang, instruction? }
+     * 返回 { ok, text?, error? }
+     * 串行模式下前端循环调用,每次完成可以立即填充
+     */
+    async i18nAiTranslateOne(dataStr: string): Promise<{ ok: boolean; text?: string; error?: string; cost?: number }> {
+        const start = Date.now();
+        try {
+            const { sourceLang, sourceText, targetLang, instruction } = JSON.parse(dataStr || '{}') as {
+                sourceLang: string;
+                sourceText: string;
+                targetLang: string;
+                instruction?: string;
+            };
+            const cfg = loadAiTranslateConfig();
+            if (!cfg || !cfg.baseUrl || !cfg.apiKey || !cfg.model) {
+                return { ok: false, error: '请先在「配置AI翻译服务」中填好 baseUrl / apiKey / model' };
+            }
+            if (!sourceText || !sourceText.trim()) {
+                return { ok: false, error: '源文本为空' };
+            }
+            if (!targetLang) {
+                return { ok: false, error: '缺少 targetLang' };
+            }
+            const promptTpl = cfg.prompt || '请把以下 {sourceLang} 翻译为 {targetLang}：\n{text}';
+            let userPrompt = renderPromptTemplate(promptTpl, {
+                sourceLang,
+                targetLang,
+                text: sourceText,
+            });
+            if (instruction && instruction.trim()) {
+                userPrompt += `\n\n用户的额外要求(必须严格遵守,覆盖默认风格):\n${instruction.trim()}`;
+            }
+            // 并发友好:每次请求新建一个 controller,加入活跃集合;取消时一起 abort
+            const ctrl = new AbortController();
+            activeAiAbortControllers.add(ctrl);
+            try {
+                const text = await callAiChatWithRetry({
+                    baseUrl: cfg.baseUrl,
+                    apiKey: cfg.apiKey,
+                    model: cfg.model,
+                    user: userPrompt,
+                    timeoutMs: (cfg.timeoutSec || 60) * 1000,
+                    retries: cfg.retries ?? 1,
+                    signal: ctrl.signal,
+                    tag: targetLang,
+                });
+                return { ok: true, text, cost: Date.now() - start };
+            } finally {
+                activeAiAbortControllers.delete(ctrl);
+            }
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e), cost: Date.now() - start };
+        }
+    },
+
+    /** 取消所有进行中的 AI 请求 */
+    async i18nAiCancel(): Promise<{ ok: boolean; aborted: number }> {
+        const n = activeAiAbortControllers.size;
+        if (n > 0) {
+            console.log(`[i18n-ai] 收到取消请求,中止 ${n} 个 fetch`);
+            for (const ctrl of activeAiAbortControllers) {
+                if (!ctrl.signal.aborted) ctrl.abort(new Error('用户取消'));
+            }
+            activeAiAbortControllers.clear();
+        }
+        return { ok: true, aborted: n };
+    },
+
+    /** 测试连接(发一个最小请求,验证 baseUrl + apiKey + model 可用) */
+    async i18nAiTestConnection(dataStr: string): Promise<{ ok: boolean; error?: string; reply?: string; cost?: number }> {
+        const start = Date.now();
+        try {
+            const cfg = JSON.parse(dataStr || '{}') as { baseUrl: string; apiKey: string; model: string; timeoutSec?: number };
+            if (!cfg.baseUrl) return { ok: false, error: '缺少 baseUrl' };
+            if (!cfg.apiKey) return { ok: false, error: '缺少 apiKey' };
+            if (!cfg.model) return { ok: false, error: '缺少 model' };
+            const ctrl = new AbortController();
+            const text = await callAiChat({
+                baseUrl: cfg.baseUrl,
+                apiKey: cfg.apiKey,
+                model: cfg.model,
+                user: 'ping',
+                timeoutMs: (cfg.timeoutSec || 30) * 1000,
+                signal: ctrl.signal,
+                tag: 'test',
+            });
+            return { ok: true, reply: text.slice(0, 80), cost: Date.now() - start };
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e), cost: Date.now() - start };
+        }
+    },
+
+    /**
+     * 旧接口(多语言并行翻译) - 保留以保证兼容,但前端现已改用 i18nAiTranslateOne 串行
+     */
+    async i18nAiTranslate(dataStr: string): Promise<{
+        ok: boolean;
+        results?: Record<string, string>;
+        errors?: Record<string, string>;
+        error?: string;
+    }> {
+        try {
+            const { sourceLang, sourceText, targetLangs, instruction } = JSON.parse(dataStr || '{}') as {
+                sourceLang: string;
+                sourceText: string;
+                targetLangs: string[];
+                instruction?: string;
+            };
+            const cfg = loadAiTranslateConfig();
+            if (!cfg || !cfg.baseUrl || !cfg.apiKey || !cfg.model) {
+                return { ok: false, error: '请先在「配置AI翻译服务」中填好 baseUrl / apiKey / model' };
+            }
+            if (!sourceText || !sourceText.trim()) return { ok: false, error: '源文本为空' };
+            if (!Array.isArray(targetLangs) || targetLangs.length === 0) return { ok: false, error: '没有目标语言' };
+
+            const promptTpl = cfg.prompt || '请把以下 {sourceLang} 翻译为 {targetLang}：\n{text}';
+            const tasks = targetLangs.map(async (targetLang): Promise<[string, { text?: string; error?: string }]> => {
+                const ctrl = new AbortController();
+                activeAiAbortControllers.add(ctrl);
+                try {
+                    let userPrompt = renderPromptTemplate(promptTpl, { sourceLang, targetLang, text: sourceText });
+                    if (instruction && instruction.trim()) {
+                        userPrompt += `\n\n用户的额外要求:\n${instruction.trim()}`;
+                    }
+                    const text = await callAiChatWithRetry({
+                        baseUrl: cfg.baseUrl,
+                        apiKey: cfg.apiKey,
+                        model: cfg.model,
+                        user: userPrompt,
+                        timeoutMs: (cfg.timeoutSec || 60) * 1000,
+                        retries: cfg.retries ?? 1,
+                        signal: ctrl.signal,
+                        tag: targetLang,
+                    });
+                    return [targetLang, { text }];
+                } catch (e: any) {
+                    return [targetLang, { error: e?.message || String(e) }];
+                } finally {
+                    activeAiAbortControllers.delete(ctrl);
+                }
+            });
+            const settled = await Promise.all(tasks);
+            const results: Record<string, string> = {};
+            const errors: Record<string, string> = {};
+            for (const [lang, r] of settled) {
+                if (typeof r.text === 'string') results[lang] = r.text;
+                else errors[lang] = r.error || '未知错误';
+            }
+            return {
+                ok: Object.keys(results).length > 0,
+                results,
+                errors: Object.keys(errors).length > 0 ? errors : undefined,
+            };
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e) };
         }
     },
 };

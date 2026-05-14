@@ -10,6 +10,7 @@
         "sourceMap": true,
         "skipLibCheck": true,
         "moduleResolution": "node",
+        "ignoreDeprecations": "6.0",
         "resolveJsonModule": true,
         "lib": ["ES2017", "DOM"]
     },
